@@ -10,13 +10,12 @@ import net.minecraft.world.inventory.Slot;
 import net.p3pp3rf1y.sophisticatedcore.client.gui.StorageScreenBase;
 import net.p3pp3rf1y.sophisticatedcore.common.gui.StorageContainerMenuBase;
 import net.p3pp3rf1y.sophisticatedcore.common.gui.UpgradeContainerBase;
-import org.spongepowered.asm.mixin.Final;
 import org.spongepowered.asm.mixin.Mixin;
-import org.spongepowered.asm.mixin.Shadow;
 import org.spongepowered.asm.mixin.Unique;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
+import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 
 import java.util.List;
 import java.util.function.Predicate;
@@ -24,11 +23,8 @@ import java.util.function.Predicate;
 /**
  * 把背包网格重排成「按模组分块 + 整行分类横幅」。
  * <p>
- * 只改客户端的槽位坐标，不动菜单数据：
- * <ul>
- *   <li>物品渲染、悬停、tooltip、点击、Shift 点击全部自动跟随槽位坐标，无需再接管。</li>
- *   <li>横幅行没有槽位，整行留给自绘的分类标题。</li>
- * </ul>
+ * 只改客户端的槽位坐标，不动菜单数据：物品渲染、悬停、tooltip、点击、Shift 点击全部自动跟随坐标。
+ * 网格原点从 slot0 的「自然坐标」推导 —— 一旦检测到 SB 重置了槽位（init / resize），就重新取基准。
  */
 @Mixin(StorageScreenBase.class)
 public abstract class StorageScreenBaseMixin {
@@ -36,14 +32,18 @@ public abstract class StorageScreenBaseMixin {
     @Unique
     private static final int SBADDON_HIDDEN = -10000;
 
-    /** 背包网格原点（相对 GUI 左上角）。AT 只作用于 Minecraft 类，SB 的字段只能用 shadow 读。 */
-    @Shadow
-    @Final
-    private static int SLOTS_X_OFFSET;
-
-    @Shadow
-    @Final
-    private static int SLOTS_Y_OFFSET;
+    @Unique
+    private int sbaddon$originX = Integer.MIN_VALUE;
+    @Unique
+    private int sbaddon$originY = Integer.MIN_VALUE;
+    @Unique
+    private int sbaddon$appliedSlot0X = Integer.MIN_VALUE;
+    @Unique
+    private int sbaddon$appliedSlot0Y = Integer.MIN_VALUE;
+    @Unique
+    private int sbaddon$scroll;
+    @Unique
+    private int sbaddon$maxScroll;
 
     @Unique
     private List<ClassifyLayout.Banner> sbaddon$banners = List.of();
@@ -51,29 +51,47 @@ public abstract class StorageScreenBaseMixin {
     @Inject(method = "render", at = @At("HEAD"))
     private void sbaddon$applyLayout(GuiGraphics graphics, int mouseX, int mouseY, float partialTick, CallbackInfo ci) {
         sbaddon$banners = List.of();
+        sbaddon$maxScroll = 0;
 
         StorageScreenBase<?> self = (StorageScreenBase<?>) (Object) this;
-        ClassifyUpgradeContainer container = sbaddon$findContainer(self);
+        AbstractContainerMenu rawMenu = self.getMenu();
+        if (!(rawMenu instanceof StorageContainerMenuBase<?> menu)) {
+            return;
+        }
+        ClassifyUpgradeContainer container = sbaddon$findContainer(menu);
         if (container == null) {
             return;
         }
 
         int cols = self.getSlotsOnLine();
-        AbstractContainerMenu rawMenu = self.getMenu();
-        if (cols <= 0 || !(rawMenu instanceof StorageContainerMenuBase<?> menu)) {
-            return;
-        }
         int storageSlots = menu.getNumberOfStorageInventorySlots();
-        if (storageSlots <= 0) {
+        if (cols <= 0 || storageSlots <= 0) {
             return;
         }
         int rows = Math.max(1, (storageSlots + cols - 1) / cols);
 
+        Slot slot0 = menu.getSlot(0);
+        if (slot0.x != sbaddon$appliedSlot0X || slot0.y != sbaddon$appliedSlot0Y) {
+            // 首帧，或 SB 刚把槽位重设为自然位置（init / resize）
+            sbaddon$originX = slot0.x;
+            sbaddon$originY = slot0.y;
+            sbaddon$scroll = 0;
+        }
+        if (sbaddon$originX == Integer.MIN_VALUE) {
+            return;
+        }
+
         Predicate<net.minecraft.world.item.ItemStack> filter = self.getStackFilter();
         ClassifyLayout.Result result = ClassifyLayout.compute(
-                menu, container, cols, rows, filter, SLOTS_X_OFFSET, SLOTS_Y_OFFSET);
+                menu, container, cols, rows, sbaddon$scroll, filter, sbaddon$originX, sbaddon$originY);
 
-        // 先全部隐藏，再按布局摆放；避免上一帧的残留位置
+        sbaddon$maxScroll = Math.max(0, result.totalRows() - rows);
+        if (sbaddon$scroll > sbaddon$maxScroll) {
+            sbaddon$scroll = sbaddon$maxScroll;
+            result = ClassifyLayout.compute(
+                    menu, container, cols, rows, sbaddon$scroll, filter, sbaddon$originX, sbaddon$originY);
+        }
+
         for (int i = 0; i < storageSlots; i++) {
             Slot slot = menu.getSlot(i);
             slot.x = SBADDON_HIDDEN;
@@ -85,7 +103,20 @@ public abstract class StorageScreenBaseMixin {
             slot.y = placement.y();
         }
 
+        sbaddon$appliedSlot0X = slot0.x;
+        sbaddon$appliedSlot0Y = slot0.y;
         sbaddon$banners = result.banners();
+    }
+
+    @Inject(method = "mouseScrolled", at = @At("HEAD"), cancellable = true)
+    private void sbaddon$onScroll(double mouseX, double mouseY, double scrollX, double scrollY,
+                                  CallbackInfoReturnable<Boolean> cir) {
+        if (sbaddon$maxScroll <= 0) {
+            return;
+        }
+        int delta = scrollY > 0 ? -1 : 1;
+        sbaddon$scroll = Math.max(0, Math.min(sbaddon$maxScroll, sbaddon$scroll + delta));
+        cir.setReturnValue(true);
     }
 
     @Inject(method = "render", at = @At("TAIL"))
@@ -112,12 +143,8 @@ public abstract class StorageScreenBaseMixin {
     }
 
     @Unique
-    private ClassifyUpgradeContainer sbaddon$findContainer(StorageScreenBase<?> self) {
-        AbstractContainerMenu menu = self.getMenu();
-        if (!(menu instanceof StorageContainerMenuBase<?> storageMenu)) {
-            return null;
-        }
-        for (UpgradeContainerBase<?, ?> container : storageMenu.getUpgradeContainers().values()) {
+    private ClassifyUpgradeContainer sbaddon$findContainer(StorageContainerMenuBase<?> menu) {
+        for (UpgradeContainerBase<?, ?> container : menu.getUpgradeContainers().values()) {
             if (container instanceof ClassifyUpgradeContainer classify) {
                 return classify;
             }

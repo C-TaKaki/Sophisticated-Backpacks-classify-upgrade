@@ -33,7 +33,9 @@ public final class ModNames {
                 IModInfo info = container.get().getModInfo();
                 String name = info.getDisplayName();
                 if (name != null && !name.isBlank()) {
-                    return Component.literal(name);
+                    // displayName 可能是语言键（汉化资源包靠翻译它实现中文名），
+                    // 用 translatable 生成：有译文就用译文，没有就原样显示。
+                    return Component.translatable(name);
                 }
             }
         } catch (Throwable ignored) {

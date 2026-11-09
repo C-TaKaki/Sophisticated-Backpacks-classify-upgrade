@@ -16,19 +16,15 @@ import java.util.Map;
 import java.util.function.Predicate;
 
 /**
- * 分类视图的纯计算层：给定背包内容 + 白名单，算出「每个存储槽应该画在哪」以及「横幅画在哪」。
- * <p>
- * 布局规则（决策：整行横幅）：
+ * 分类视图的纯计算层：给定背包内容 + 白名单 + 滚动行数，算出「每个存储槽画在哪」「横幅画在哪」。
  * <pre>
  *   ┌──────────────────────────────────┐
  *   │ [图标] 模组名                      │  ← 横幅占满一整行
  *   ├──────────────────────────────────┤
  *   │ [物品][物品][物品]...              │  ← 该组物品按行流式排
- *   ├──────────────────────────────────┤
- *   │ [图标] 下一个模组                  │
  *   └──────────────────────────────────┘
  * </pre>
- * 空槽统一推到内容之后，保持背包底部的空位观感。
+ * 超出可视行数的内容随滚动偏移移动，滚出范围的槽位直接隐藏。
  */
 public final class ClassifyLayout {
 
@@ -43,14 +39,14 @@ public final class ClassifyLayout {
     public record Placement(int slotIndex, int x, int y) {
     }
 
-    public record Result(List<Banner> banners, List<Placement> placements, List<Integer> hiddenSlots) {
+    public record Result(List<Banner> banners, List<Placement> placements, int totalRows) {
         public static Result empty() {
-            return new Result(List.of(), List.of(), List.of());
+            return new Result(List.of(), List.of(), 0);
         }
     }
 
     public static Result compute(StorageContainerMenuBase<?> menu, ClassifyUpgradeContainer container,
-                                 int cols, int rows, Predicate<ItemStack> filter,
+                                 int cols, int rows, int scrollRows, Predicate<ItemStack> filter,
                                  int originX, int originY) {
         int storageSlots = menu.getNumberOfStorageInventorySlots();
         if (storageSlots <= 0 || cols <= 0 || rows <= 0) {
@@ -88,59 +84,57 @@ public final class ClassifyLayout {
 
         int row = 0;
         for (Map.Entry<String, List<Integer>> entry : buckets.entrySet()) {
-            List<Integer> items = entry.getValue();
-            if (items.isEmpty()) {
+            if (entry.getValue().isEmpty()) {
                 continue;
             }
-            row = placeGroup(row, cols, rows, entry.getKey(), iconFor(samples, entry.getKey()),
-                    items, originX, originY, banners, placements, used);
+            row = placeGroup(row, cols, rows, scrollRows, entry.getKey(), iconFor(samples, entry.getKey()),
+                    entry.getValue(), originX, originY, banners, placements, used);
         }
         if (!fallback.isEmpty()) {
-            row = placeGroup(row, cols, rows, "", iconFor(samples, null),
+            row = placeGroup(row, cols, rows, scrollRows, "", iconFor(samples, null),
                     fallback, originX, originY, banners, placements, used);
         }
+        int contentRows = row;
 
-        // 剩余空槽按顺序填在后面（保持背包底部空位观感），超出可视区就隐藏
+        // 剩余空槽跟在内容后面；滚出可视区的一律不改坐标（保持隐藏）
         boolean[] taken = new boolean[storageSlots];
         for (int index : used) {
             taken[index] = true;
         }
-        List<Integer> hidden = new ArrayList<>();
-        int cell = row * cols;
+        int cell = contentRows * cols;
         for (int i = 0; i < storageSlots; i++) {
             if (taken[i]) {
                 continue;
             }
-            int r = cell / cols;
+            int r = cell / cols - scrollRows;
             int c = cell % cols;
-            if (r >= rows) {
-                hidden.add(i);
-            } else {
+            if (r >= 0 && r < rows) {
                 placements.add(new Placement(i, originX + c * CELL, originY + r * CELL));
             }
             cell++;
         }
-        return new Result(banners, placements, hidden);
+        return new Result(banners, placements, contentRows);
     }
 
-    private static int placeGroup(int row, int cols, int rows, String namespace, ItemStack icon,
+    private static int placeGroup(int row, int cols, int rows, int scrollRows, String namespace, ItemStack icon,
                                   List<Integer> items, int originX, int originY,
                                   List<Banner> banners, List<Placement> placements, List<Integer> used) {
         Component label = namespace.isEmpty()
                 ? Component.translatable("gui.sbaddon.classify.fallback")
                 : ModNames.displayName(namespace);
 
-        if (row < rows) {
-            banners.add(new Banner(originX, originY + row * CELL, cols * CELL - 1, icon, label));
+        int bannerRow = row - scrollRows;
+        if (bannerRow >= 0 && bannerRow < rows) {
+            banners.add(new Banner(originX, originY + bannerRow * CELL, cols * CELL - 1, icon, label));
         }
         row++;
 
         for (int k = 0; k < items.size(); k++) {
-            int r = row + k / cols;
+            int r = row + k / cols - scrollRows;
             int c = k % cols;
             int slotIndex = items.get(k);
             used.add(slotIndex);
-            if (r < rows) {
+            if (r >= 0 && r < rows) {
                 placements.add(new Placement(slotIndex, originX + c * CELL, originY + r * CELL));
             }
         }
