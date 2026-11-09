@@ -1,5 +1,6 @@
 package com.huanj.sbaddon;
 
+import com.huanj.sbaddon.registry.SBCreativeTabs;
 import com.huanj.sbaddon.registry.SBItems;
 import com.mojang.logging.LogUtils;
 import net.neoforged.bus.api.IEventBus;
@@ -15,6 +16,7 @@ public class SBAddon {
 
     public SBAddon(IEventBus modEventBus, ModContainer modContainer) {
         SBItems.register(modEventBus);
+        SBCreativeTabs.register(modEventBus);
         // 升级类型 / 容器类型在 FMLCommonSetupEvent 里注册（见 CommonSetup），
         // 因为 UpgradeContainerRegistry 的 key 必须是物品注册名，物品那时才真正注册完。
         LOGGER.info("[sbaddon] Sophisticated Backpacks Addon 已加载");

@@ -1,4 +1,5 @@
 {
+  "itemGroup.sbaddon": "精妙背包附属",
   "item.sbaddon.classify_upgrade": "分类扩展升级",
   "gui.sbaddon.classify.title": "分类扩展",
   "gui.sbaddon.classify.tooltip": "按模组对背包内容分组显示",
