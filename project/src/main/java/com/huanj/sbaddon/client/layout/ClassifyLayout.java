@@ -5,11 +5,9 @@ import com.huanj.sbaddon.upgrade.ClassifyUpgradeContainer;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.network.chat.Component;
 import net.minecraft.world.item.ItemStack;
-import net.p3pp3rf1y.sophisticatedcore.common.gui.SortBy;
 import net.p3pp3rf1y.sophisticatedcore.common.gui.StorageContainerMenuBase;
 
 import java.util.ArrayList;
-import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -88,8 +86,8 @@ public final class ClassifyLayout {
             }
         }
 
-        fallback.sort(comparator(menu, container.getFallbackSort()));
-
+        // 兜底组不再自己排序：直接沿用存储槽的原始顺序，而 SB 的排序按钮会重排实际物品，
+        // 所以"跟随背包自带排序"是自然成立的。
         List<Banner> banners = new ArrayList<>();
         List<Placement> placements = new ArrayList<>();
         List<Cell> gaps = new ArrayList<>();
@@ -180,8 +178,13 @@ public final class ClassifyLayout {
     }
 
     private static ItemStack iconFor(List<ItemStack> samples, String namespace) {
-        if (namespace == null) {
+        if (namespace == null || namespace.isEmpty()) {
             return ItemStack.EMPTY;
+        }
+        // 优先用该模组创造标签页的图标，和玩家在创造模式里看到的保持一致
+        ItemStack tabIcon = ModNames.icon(namespace);
+        if (!tabIcon.isEmpty()) {
+            return tabIcon;
         }
         for (ItemStack sample : samples) {
             if (sample.isEmpty()) {
@@ -192,18 +195,5 @@ public final class ClassifyLayout {
             }
         }
         return ItemStack.EMPTY;
-    }
-
-    private static Comparator<Integer> comparator(StorageContainerMenuBase<?> menu, SortBy sortBy) {
-        Comparator<Integer> byName = Comparator.comparing(
-                i -> menu.getSlot(i).getItem().getHoverName().getString());
-        return switch (sortBy) {
-            case COUNT -> Comparator.<Integer>comparingInt(i -> -menu.getSlot(i).getItem().getCount())
-                    .thenComparing(byName);
-            case TAGS -> Comparator.<Integer, String>comparing(i -> menu.getSlot(i).getItem().getTags()
-                            .map(Object::toString).sorted().findFirst().orElse(""))
-                    .thenComparing(byName);
-            default -> byName;
-        };
     }
 }

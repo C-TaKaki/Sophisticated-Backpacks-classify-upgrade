@@ -9,9 +9,5 @@
   "gui.sbaddon.classify.vanilla": "原版",
   "gui.sbaddon.classify.hint": "拖入添加；拖手柄调序；× 删除",
   "gui.sbaddon.classify.hint.empty": "拖入物品以添加模组",
-  "gui.sbaddon.classify.row.empty": "拖入物品添加",
-  "gui.sbaddon.classify.sort": "排序：%s",
-  "gui.sbaddon.classify.sort.name": "名称",
-  "gui.sbaddon.classify.sort.count": "数量",
-  "gui.sbaddon.classify.sort.tags": "标签"
+  "gui.sbaddon.classify.row.empty": "拖入物品添加"
 }

@@ -15,6 +15,7 @@ import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Unique;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
+import org.spongepowered.asm.mixin.injection.Redirect;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 
@@ -123,6 +124,32 @@ public abstract class StorageScreenBaseMixin {
     @Inject(method = "drawSlotBg", at = @At("HEAD"), cancellable = true)
     private void sbaddon$drawSlotBg(GuiGraphics graphics, int left, int top, int slotsCount, CallbackInfo ci) {
         if (!sbaddon$placements.isEmpty()) {
+            ci.cancel();
+        }
+    }
+
+    /**
+     * 升级槽左侧的「启用/停用」开关：分类升级没有开关概念，把它自己的那个开关去掉。
+     * 只影响本模组的升级，其它升级的开关照旧。
+     */
+    @Redirect(method = "addUpgradeSwitches", at = @At(value = "INVOKE",
+            target = "Lnet/p3pp3rf1y/sophisticatedcore/common/gui/StorageContainerMenuBase;canDisableUpgrade(I)Z"))
+    private boolean sbaddon$hideOwnUpgradeSwitch(StorageContainerMenuBase<?> menu, int upgradeSlot) {
+        if (menu.getUpgradeContainers().get(upgradeSlot) instanceof ClassifyUpgradeContainer) {
+            return false;
+        }
+        return menu.canDisableUpgrade(upgradeSlot);
+    }
+
+    /**
+     * 样本槽里真正存的是玩家拖进来的样本物品，但界面上要显示该模组**创造标签页的图标**。
+     * <p>
+     * SB 重写了 {@code renderSlot}，页签控件又画在槽位之前，槽位物品会盖住我们画的图标，
+     * 所以这里直接掐掉样本槽的自身渲染，图标由 {@link ClassifyTab} 自己画。
+     */
+    @Inject(method = "renderSlot", at = @At("HEAD"), cancellable = true)
+    private void sbaddon$hideSampleSlotItem(GuiGraphics graphics, Slot slot, CallbackInfo ci) {
+        if (slot instanceof ClassifyUpgradeContainer.SampleSlot && ClassifyTab.getActiveTab() != null) {
             ci.cancel();
         }
     }

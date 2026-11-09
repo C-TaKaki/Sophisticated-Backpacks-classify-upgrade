@@ -9,7 +9,6 @@ import net.neoforged.neoforge.items.SlotItemHandler;
 import net.p3pp3rf1y.sophisticatedcore.common.gui.IFilterSlot;
 import net.p3pp3rf1y.sophisticatedcore.common.gui.UpgradeContainerBase;
 import net.p3pp3rf1y.sophisticatedcore.common.gui.UpgradeContainerType;
-import net.p3pp3rf1y.sophisticatedcore.common.gui.SortBy;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -28,7 +27,6 @@ public class ClassifyUpgradeContainer extends UpgradeContainerBase<ClassifyUpgra
      */
     public static final int SAMPLE_COUNT = 64;
 
-    private static final String TAG_SORT = "Sort";
     private static final String TAG_VIEW = "View";
     private static final String TAG_ORDER = "Order";
 
@@ -92,17 +90,8 @@ public class ClassifyUpgradeContainer extends UpgradeContainerBase<ClassifyUpgra
         }
     }
 
-
     public List<String> getModWhitelist() {
         return ClassifyUpgradeWrapper.modWhitelist(getSampleStacks());
-    }
-
-    public SortBy getFallbackSort() {
-        return upgradeWrapper.getFallbackSort();
-    }
-
-    public void setFallbackSort(SortBy sortBy) {
-        upgradeWrapper.setFallbackSort(sortBy);
     }
 
     public int getView() {
@@ -123,22 +112,12 @@ public class ClassifyUpgradeContainer extends UpgradeContainerBase<ClassifyUpgra
 
     @Override
     public void handlePacket(CompoundTag tag) {
-        if (tag.contains(TAG_SORT)) {
-            upgradeWrapper.setFallbackSort(SortBy.fromName(tag.getString(TAG_SORT)));
-        }
         if (tag.contains(TAG_VIEW)) {
             upgradeWrapper.setView(tag.getInt(TAG_VIEW));
         }
         if (tag.contains(TAG_ORDER)) {
             applyOrder(tag.getIntArray(TAG_ORDER));
         }
-    }
-
-    /** 标记需要发给服务端的状态变更包内容。 */
-    public static CompoundTag sortTag(SortBy sortBy) {
-        CompoundTag tag = new CompoundTag();
-        tag.putString(TAG_SORT, sortBy.getSerializedName());
-        return tag;
     }
 
     public static CompoundTag viewTag(int view) {

@@ -5,7 +5,6 @@ import net.minecraft.nbt.CompoundTag;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.component.CustomData;
 import net.p3pp3rf1y.sophisticatedcore.api.IStorageWrapper;
-import net.p3pp3rf1y.sophisticatedcore.common.gui.SortBy;
 import net.p3pp3rf1y.sophisticatedcore.upgrades.UpgradeWrapperBase;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.core.registries.BuiltInRegistries;
@@ -22,8 +21,6 @@ public class ClassifyUpgradeWrapper extends UpgradeWrapperBase<ClassifyUpgradeWr
 
     /** 样本槽物品列表（ItemStackHandler 的序列化结果），由容器负责读写。 */
     public static final String TAG_SAMPLES = "Samples";
-    /** 兜底组排序键：COUNT / NAME / TAGS。 */
-    public static final String TAG_FALLBACK_SORT = "FallbackSort";
     /** 已折叠的组（模组命名空间）。 */
     public static final String TAG_COLLAPSED = "Collapsed";
     /** 当前子页：0 = 列表，1 = 配置。 */
@@ -55,23 +52,6 @@ public class ClassifyUpgradeWrapper extends UpgradeWrapperBase<ClassifyUpgradeWr
     public void setSamplesTag(CompoundTag samplesTag) {
         CompoundTag data = data();
         data.put(TAG_SAMPLES, samplesTag);
-        setData(data);
-    }
-
-    public SortBy getFallbackSort() {
-        String name = data().getString(TAG_FALLBACK_SORT);
-        for (SortBy sortBy : SortBy.values()) {
-            // MOD 对兜底组无意义，直接排除
-            if (sortBy != SortBy.MOD && sortBy.getSerializedName().equals(name)) {
-                return sortBy;
-            }
-        }
-        return SortBy.COUNT;
-    }
-
-    public void setFallbackSort(SortBy sortBy) {
-        CompoundTag data = data();
-        data.putString(TAG_FALLBACK_SORT, sortBy.getSerializedName());
         setData(data);
     }
 

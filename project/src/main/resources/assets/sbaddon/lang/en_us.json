@@ -9,9 +9,5 @@
   "gui.sbaddon.classify.vanilla": "Vanilla",
   "gui.sbaddon.classify.hint": "Drop to add; drag handle; x to delete",
   "gui.sbaddon.classify.hint.empty": "Drop an item to add its mod",
-  "gui.sbaddon.classify.row.empty": "Drop item here",
-  "gui.sbaddon.classify.sort": "Sort: %s",
-  "gui.sbaddon.classify.sort.name": "Name",
-  "gui.sbaddon.classify.sort.count": "Count",
-  "gui.sbaddon.classify.sort.tags": "Tags"
+  "gui.sbaddon.classify.row.empty": "Drop item here"
 }

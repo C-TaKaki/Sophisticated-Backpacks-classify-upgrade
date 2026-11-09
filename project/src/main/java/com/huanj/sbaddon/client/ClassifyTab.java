@@ -10,7 +10,6 @@ import net.p3pp3rf1y.sophisticatedcore.client.gui.StorageScreenBase;
 import net.p3pp3rf1y.sophisticatedcore.client.gui.UpgradeSettingsTab;
 import net.p3pp3rf1y.sophisticatedcore.client.gui.utils.Dimension;
 import net.p3pp3rf1y.sophisticatedcore.client.gui.utils.Position;
-import net.p3pp3rf1y.sophisticatedcore.common.gui.SortBy;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -35,8 +34,8 @@ public class ClassifyTab extends UpgradeSettingsTab<ClassifyUpgradeContainer> {
     private static final int HANDLE_W = 9;
     private static final int DELETE_W = 9;
     private static final int CELL = 18;
-    private static final int BAR_H = 11;
-    private static final int FOOTER_H = 34;
+    /** 底部只留一行提示文字。 */
+    private static final int FOOTER_H = 18;
     private static final int SCROLLBAR_W = 3;
 
     private static final int COLOR_ROW_BG = 0xFF8E8E8E;
@@ -45,7 +44,6 @@ public class ClassifyTab extends UpgradeSettingsTab<ClassifyUpgradeContainer> {
     private static final int COLOR_ICON_BOX = 0xFF4A4A4A;
     private static final int COLOR_LABEL = 0xFF1E1E1E;
     private static final int COLOR_LABEL_DIM = 0xFF5A5A5A;
-    private static final int COLOR_BAR_BTN = 0xFF8A8A8A;
     private static final int COLOR_HANDLE = 0xFF3C3C3C;
 
     /** 渲染期缓存的命中区：rowHits[i] = {行号, 是否条目, x, y, w, h, handleX, deleteX}。 */
@@ -57,10 +55,6 @@ public class ClassifyTab extends UpgradeSettingsTab<ClassifyUpgradeContainer> {
     public static ClassifyTab getActiveTab() {
         return activeTab;
     }
-
-    private int sortButtonX;
-    private int sortButtonY;
-    private int sortButtonW;
 
     private int scrollRow;
     private int draggingRow = -1;
@@ -202,7 +196,7 @@ public class ClassifyTab extends UpgradeSettingsTab<ClassifyUpgradeContainer> {
 
         drawList(graphics, mouseX, mouseY, rows);
         drawScrollbar(graphics, rows.size(), visible);
-        drawFooter(graphics, mouseX, mouseY);
+        drawFooter(graphics);
     }
 
     private void drawList(GuiGraphics graphics, int mouseX, int mouseY, List<Integer> rows) {
@@ -224,7 +218,7 @@ public class ClassifyTab extends UpgradeSettingsTab<ClassifyUpgradeContainer> {
             graphics.fill(x, y, x + w, y + 1, COLOR_ROW_HL);
             graphics.fill(x, y + h - 1, x + w, y + h, COLOR_ROW_SH);
 
-            // 图标框 18×18，内部物品 16×16 正好居中（槽位物品由界面绘制在框内）
+            // 图标框 18×18；物品画的是「该模组创造标签页的图标」（样本槽自身的渲染已被隐藏）
             int iconX = rowIconX();
             int iconY = rowIconY(vis);
             graphics.fill(iconX - 2, y, iconX + CELL - 2, y + h, COLOR_ICON_BOX);
@@ -235,8 +229,11 @@ public class ClassifyTab extends UpgradeSettingsTab<ClassifyUpgradeContainer> {
             int nameW = Math.max(0, deleteX - nameX - 3);
             String name;
             if (entry) {
-                ItemStack stack = getContainer().getSamples().getStackInSlot(rows.get(r));
-                name = ModNames.displayName(ModNames.namespaceOf(stack)).getString();
+                ItemStack sample = getContainer().getSamples().getStackInSlot(rows.get(r));
+                String namespace = ModNames.namespaceOf(sample);
+                ItemStack icon = ModNames.icon(namespace);
+                graphics.renderItem(icon.isEmpty() ? sample : icon, iconX, iconY);
+                name = ModNames.displayName(namespace).getString();
             } else {
                 name = Component.translatable("gui.sbaddon.classify.row.empty").getString();
             }
@@ -296,26 +293,13 @@ public class ClassifyTab extends UpgradeSettingsTab<ClassifyUpgradeContainer> {
         }
     }
 
-    private void drawFooter(GuiGraphics graphics, int mouseX, int mouseY) {
+    private void drawFooter(GuiGraphics graphics) {
         int textLeft = getX() + PAD + 1;
         int maxTextWidth = getWidth() - PAD * 2 - 2;
         int hintY = getY() + TAB_HEIGHT - FOOTER_H + 2;
 
         Component hint = Component.translatable("gui.sbaddon.classify.hint");
         graphics.drawString(font, truncate(hint.getString(), maxTextWidth), textLeft, hintY, COLOR_LABEL_DIM, false);
-
-        SortBy sortBy = getContainer().getFallbackSort();
-        Component sortLabel = Component.translatable("gui.sbaddon.classify.sort",
-                Component.translatable("gui.sbaddon.classify.sort." + sortBy.getSerializedName()));
-        int w = Math.min(maxTextWidth, font.width(sortLabel) + 6);
-        int x = textLeft;
-        int y = hintY + 11;
-        sortButtonX = x;
-        sortButtonY = y;
-        sortButtonW = w;
-        boolean hovered = inside(mouseX, mouseY, x, y, w, BAR_H - 1);
-        graphics.fill(x, y, x + w, y + BAR_H - 1, hovered ? 0xFF6E8A5A : COLOR_BAR_BTN);
-        graphics.drawString(font, truncate(sortLabel.getString(), w - 5), x + 3, y + 1, 0xFF202020, false);
     }
 
     private String truncate(String text, int maxWidth) {
@@ -341,16 +325,6 @@ public class ClassifyTab extends UpgradeSettingsTab<ClassifyUpgradeContainer> {
         }
         if (button != 0) {
             return false;
-        }
-        if (sortButtonW > 0 && inside(mouseX, mouseY, sortButtonX, sortButtonY, sortButtonW, BAR_H - 1)) {
-            SortBy candidate = getContainer().getFallbackSort().next();
-            if (candidate == SortBy.MOD) {
-                candidate = candidate.next();
-            }
-            final SortBy next = candidate;
-            getContainer().setFallbackSort(next);
-            getContainer().sendDataToServer(() -> ClassifyUpgradeContainer.sortTag(next));
-            return true;
         }
         for (int[] hit : rowHits) {
             if (hit[1] != 1) {
