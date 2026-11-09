@@ -75,7 +75,7 @@ public class ClassifyTab extends UpgradeSettingsTab<ClassifyUpgradeContainer> {
      * SB 把页签的 x 贴着背包面板内缘放，左侧两个圆角正好被面板边框压掉，看起来是直角；
      * 原版页签同样带圆角，只是位置更靠左、圆角露在面板外。这里跟着左移，把左侧圆角让出来。
      */
-    private static final int X_SHIFT = 6;
+    private static final int X_SHIFT = 3;
 
     /** SB 给的原始 X（未偏移）。每次打开都从它重新算，避免反复开关导致偏移累积。 */
     private int baseX = Integer.MIN_VALUE;
