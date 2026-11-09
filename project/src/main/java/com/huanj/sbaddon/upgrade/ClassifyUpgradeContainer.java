@@ -6,6 +6,7 @@ import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.ItemStack;
 import net.neoforged.neoforge.items.ItemStackHandler;
 import net.neoforged.neoforge.items.SlotItemHandler;
+import net.p3pp3rf1y.sophisticatedcore.common.gui.StorageContainerMenuBase;
 import net.p3pp3rf1y.sophisticatedcore.common.gui.UpgradeContainerBase;
 import net.p3pp3rf1y.sophisticatedcore.common.gui.UpgradeContainerType;
 import net.p3pp3rf1y.sophisticatedcore.common.gui.SortBy;
@@ -27,6 +28,9 @@ public class ClassifyUpgradeContainer extends UpgradeContainerBase<ClassifyUpgra
 
     private static final String TAG_SORT = "Sort";
     private static final String TAG_VIEW = "View";
+    private static final String TAG_ADD_HELD = "AddHeld";
+    private static final String TAG_REMOVE_LAST = "RemoveLast";
+    private static final String TAG_ORDER = "Order";
 
     private final SampleHandler samples;
 
@@ -67,6 +71,72 @@ public class ClassifyUpgradeContainer extends UpgradeContainerBase<ClassifyUpgra
         return stacks;
     }
 
+    /**
+     * 按给定顺序重排样本槽：{@code slotOrder[i]} 表示新第 i 行取原第 slotOrder[i] 个槽位的物品。
+     * 重排后顺序紧凑（前面填满，后面清空），顺带消掉删除留下的空档。
+     */
+    public void applyOrder(int[] slotOrder) {
+        List<ItemStack> old = new ArrayList<>();
+        for (int i = 0; i < samples.getSlots(); i++) {
+            old.add(samples.getStackInSlot(i));
+        }
+        List<ItemStack> reordered = new ArrayList<>();
+        for (int oldIndex : slotOrder) {
+            reordered.add(oldIndex >= 0 && oldIndex < old.size() ? old.get(oldIndex) : ItemStack.EMPTY);
+        }
+        for (int i = 0; i < samples.getSlots(); i++) {
+            samples.setStackInSlot(i, ItemStack.EMPTY);
+        }
+        for (int i = 0; i < reordered.size() && i < samples.getSlots(); i++) {
+            samples.setStackInSlot(i, reordered.get(i));
+        }
+    }
+
+    /** 「+」：把玩家光标上的物品取 1 个作为新条目。仅服务端执行。 */
+    private void addHeldSample() {
+        if (player.level().isClientSide()) {
+            return;
+        }
+        if (!(player.containerMenu instanceof StorageContainerMenuBase<?> menu)) {
+            return;
+        }
+        ItemStack carried = menu.getCarried();
+        if (carried.isEmpty()) {
+            return;
+        }
+        int empty = -1;
+        for (int i = 0; i < samples.getSlots(); i++) {
+            if (samples.getStackInSlot(i).isEmpty()) {
+                empty = i;
+                break;
+            }
+        }
+        if (empty < 0) {
+            return;
+        }
+        samples.setStackInSlot(empty, carried.copyWithCount(1));
+        carried.shrink(1);
+        menu.setCarried(carried.isEmpty() ? ItemStack.EMPTY : carried);
+    }
+
+    /** 「-」：删掉最后一条，物品退回玩家背包（背包满则掉落）。仅服务端执行。 */
+    private void removeLastSample() {
+        if (player.level().isClientSide()) {
+            return;
+        }
+        for (int i = samples.getSlots() - 1; i >= 0; i--) {
+            ItemStack stack = samples.getStackInSlot(i);
+            if (!stack.isEmpty()) {
+                samples.setStackInSlot(i, ItemStack.EMPTY);
+                ItemStack back = stack.copy();
+                if (!player.getInventory().add(back)) {
+                    player.drop(back, false);
+                }
+                return;
+            }
+        }
+    }
+
     public List<String> getModWhitelist() {
         return ClassifyUpgradeWrapper.modWhitelist(getSampleStacks());
     }
@@ -103,6 +173,15 @@ public class ClassifyUpgradeContainer extends UpgradeContainerBase<ClassifyUpgra
         if (tag.contains(TAG_VIEW)) {
             upgradeWrapper.setView(tag.getInt(TAG_VIEW));
         }
+        if (tag.getBoolean(TAG_ADD_HELD)) {
+            addHeldSample();
+        }
+        if (tag.getBoolean(TAG_REMOVE_LAST)) {
+            removeLastSample();
+        }
+        if (tag.contains(TAG_ORDER)) {
+            applyOrder(tag.getIntArray(TAG_ORDER));
+        }
     }
 
     /** 标记需要发给服务端的状态变更包内容。 */
@@ -115,6 +194,24 @@ public class ClassifyUpgradeContainer extends UpgradeContainerBase<ClassifyUpgra
     public static CompoundTag viewTag(int view) {
         CompoundTag tag = new CompoundTag();
         tag.putInt(TAG_VIEW, view);
+        return tag;
+    }
+
+    public static CompoundTag addHeldTag() {
+        CompoundTag tag = new CompoundTag();
+        tag.putBoolean(TAG_ADD_HELD, true);
+        return tag;
+    }
+
+    public static CompoundTag removeLastTag() {
+        CompoundTag tag = new CompoundTag();
+        tag.putBoolean(TAG_REMOVE_LAST, true);
+        return tag;
+    }
+
+    public static CompoundTag reorderTag(int[] slotOrder) {
+        CompoundTag tag = new CompoundTag();
+        tag.putIntArray(TAG_ORDER, slotOrder);
         return tag;
     }
 
