@@ -1,6 +1,7 @@
 package com.huanj.sbaddon.client;
 
 import com.huanj.sbaddon.upgrade.ClassifyUpgradeContainer;
+import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.network.chat.Component;
@@ -70,32 +71,37 @@ public class ClassifyTab extends UpgradeSettingsTab<ClassifyUpgradeContainer> {
     // ---------------------------------------------------------------- 位置
 
     /**
-     * 展开后整体向左偏移的像素数。
+     * 背景向左多扩出的像素数。
      * <p>
      * SB 把页签的 x 贴着背包面板内缘放，左侧两个圆角正好被面板边框压掉，看起来是直角；
-     * 原版页签同样带圆角，只是位置更靠左、圆角露在面板外。这里跟着左移，把左侧圆角让出来。
+     * 原版页签同样带圆角，只是位置更靠左、圆角露在面板外。
+     * 这里只把**背景**向左扩，页面里的图标、文字、槽位仍然按原来的坐标排，不会跟着位移。
      */
     private static final int X_SHIFT = 3;
 
-    /** SB 给的原始 X（未偏移）。每次打开都从它重新算，避免反复开关导致偏移累积。 */
-    private int baseX = Integer.MIN_VALUE;
-
+    /**
+     * 只偏移背景的绘制范围：临时把 {@code x} 左移、宽度加大，画完立刻还原。
+     * <p>
+     * 不能改 {@link #onTabOpen()} 里的位置 —— 那样列表、槽位、文字全都以 {@code getX()} 为基准，
+     * 会一起位移。
+     */
     @Override
-    protected void onTabOpen() {
-        if (baseX == Integer.MIN_VALUE) {
-            baseX = getX();
+    protected void renderBg(GuiGraphics graphics, Minecraft minecraft, int mouseX, int mouseY) {
+        int expandedWidth = getWidth();
+        if (expandedWidth <= 21) {
+            // 收起状态那条竖着的小页签保持原样
+            super.renderBg(graphics, minecraft, mouseX, mouseY);
+            return;
         }
-        setPosition(new Position(baseX - X_SHIFT, getY()));
-        super.onTabOpen();
-    }
-
-    @Override
-    protected void onTabClose() {
-        // 收起时要回到原位，否则右侧那条竖着的小页签会整体左移，和背包上的图标对不上
-        if (baseX != Integer.MIN_VALUE) {
-            setPosition(new Position(baseX, getY()));
+        int oldX = x;
+        x = oldX - X_SHIFT;
+        setWidth(expandedWidth + X_SHIFT);
+        try {
+            super.renderBg(graphics, minecraft, mouseX, mouseY);
+        } finally {
+            x = oldX;
+            setWidth(expandedWidth);
         }
-        super.onTabClose();
     }
 
     // ---------------------------------------------------------------- 布局
