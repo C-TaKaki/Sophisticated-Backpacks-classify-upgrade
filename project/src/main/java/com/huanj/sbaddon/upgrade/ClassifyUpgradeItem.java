@@ -43,10 +43,18 @@ public class ClassifyUpgradeItem extends UpgradeItemBase<ClassifyUpgradeWrapper>
     public net.p3pp3rf1y.sophisticatedcore.common.gui.UpgradeSlotChangeResult canAddUpgradeTo(
             net.p3pp3rf1y.sophisticatedcore.api.IStorageWrapper storageWrapper,
             net.minecraft.world.item.ItemStack upgradeStack, boolean firstLevelStorage, boolean isClientSide) {
-        var result = super.canAddUpgradeTo(storageWrapper, upgradeStack, firstLevelStorage, isClientSide);
+        com.huanj.sbaddon.SBAddon.LOGGER.info("[sbaddon] >>> canAddUpgradeTo 进入 item={} count={} class={}",
+                upgradeStack.getItem(), upgradeStack.getCount(), getClass().getName());
+        net.p3pp3rf1y.sophisticatedcore.common.gui.UpgradeSlotChangeResult result;
+        try {
+            result = super.canAddUpgradeTo(storageWrapper, upgradeStack, firstLevelStorage, isClientSide);
+        } catch (Throwable t) {
+            com.huanj.sbaddon.SBAddon.LOGGER.error("[sbaddon] canAddUpgradeTo 抛异常", t);
+            throw t;
+        }
         com.huanj.sbaddon.SBAddon.LOGGER.info(
-                "[sbaddon] canAddUpgradeTo: storageType={}, firstLevel={}, client={}, count={}, perStorage={}, result={} {}",
-                storageWrapper.getStorageType(), firstLevelStorage, isClientSide, upgradeStack.getCount(),
+                "[sbaddon] <<< canAddUpgradeTo: storageType={}, firstLevel={}, client={}, perStorage={}, result={} {}",
+                storageWrapper.getStorageType(), firstLevelStorage, isClientSide,
                 getUpgradesPerStorage(storageWrapper.getStorageType()), result.successful(),
                 result.getErrorMessage().map(c -> c.getString()).orElse("-"));
         return result;
