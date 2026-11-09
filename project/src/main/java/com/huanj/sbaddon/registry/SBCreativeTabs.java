@@ -1,35 +1,33 @@
 package com.huanj.sbaddon.registry;
 
 import com.huanj.sbaddon.SBAddon;
-import net.minecraft.core.registries.Registries;
-import net.minecraft.network.chat.Component;
-import net.minecraft.world.item.CreativeModeTab;
 import net.neoforged.bus.api.IEventBus;
-import net.neoforged.neoforge.registries.DeferredHolder;
-import net.neoforged.neoforge.registries.DeferredRegister;
+import net.neoforged.neoforge.event.BuildCreativeModeTabContentsEvent;
 
 /**
- * 创造模式标签页。
+ * 把本模组物品挂到精妙背包自己的创造模式标签页（{@code sophisticatedbackpacks:main}）。
  * <p>
- * 必须注册：JEI / REI 的物品索引来自创造标签页的内容，物品若不属于任何标签页，
- * 即使已正常注册进物品注册表，在 JEI 里也搜不到、创造模式里也拿不到。
+ * 不自己新建标签页：这样物品和背包、升级显示在一起，JEI / REI 也能正常索引到
+ * （它们只索引创造标签页的内容，不在任何标签页里的物品搜不到、创造模式也拿不到）。
+ * <p>
+ * 用事件而不是直接改 SB 的 DeferredRegister：SB 的标签页由它自己注册，
+ * 我们只在它构建内容时追加，互不干扰。
  */
 public final class SBCreativeTabs {
 
-    public static final DeferredRegister<CreativeModeTab> TABS =
-            DeferredRegister.create(Registries.CREATIVE_MODE_TAB, SBAddon.MOD_ID);
-
-    public static final DeferredHolder<CreativeModeTab, CreativeModeTab> MAIN = TABS.register("main",
-            () -> CreativeModeTab.builder()
-                    .title(Component.translatable("itemGroup.sbaddon"))
-                    .icon(() -> SBItems.CLASSIFY_UPGRADE.get().getDefaultInstance())
-                    .displayItems((params, output) -> output.accept(SBItems.CLASSIFY_UPGRADE.get()))
-                    .build());
+    /** 精妙背包创造标签页的命名空间（{@code sophisticatedbackpacks:main}）。 */
+    private static final String SB_NAMESPACE = "sophisticatedbackpacks";
 
     private SBCreativeTabs() {
     }
 
     public static void register(IEventBus modEventBus) {
-        TABS.register(modEventBus);
+        modEventBus.addListener(SBCreativeTabs::onBuildContents);
+    }
+
+    private static void onBuildContents(BuildCreativeModeTabContentsEvent event) {
+        if (SB_NAMESPACE.equals(event.getTabKey().location().getNamespace())) {
+            event.accept(SBItems.CLASSIFY_UPGRADE.get());
+        }
     }
 }

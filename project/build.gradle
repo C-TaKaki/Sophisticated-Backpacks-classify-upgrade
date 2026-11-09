@@ -83,6 +83,8 @@ tasks.named('processResources', ProcessResources).configure {
             mod_authors            : mod_authors
     ]
     inputs.properties replaceProperties
+    // 许可证一并打进 jar（源文件只有 project/LICENSE 一份，避免两处内容漂移）
+    from('LICENSE')
     filesMatching(['META-INF/neoforge.mods.toml', 'pack.mcmeta']) {
         expand replaceProperties
     }

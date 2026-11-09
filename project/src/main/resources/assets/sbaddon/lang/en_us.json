@@ -1,5 +1,4 @@
 {
-  "itemGroup.sbaddon": "Sophisticated Backpacks Addon",
   "item.sbaddon.classify_upgrade": "Classification Upgrade",
   "gui.sbaddon.classify.title": "Classification",
   "gui.sbaddon.classify.tooltip": "Groups backpack contents by mod",
