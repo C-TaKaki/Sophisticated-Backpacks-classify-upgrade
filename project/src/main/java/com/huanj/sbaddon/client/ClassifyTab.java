@@ -9,6 +9,7 @@ import net.minecraft.world.item.ItemStack;
 import net.p3pp3rf1y.sophisticatedcore.client.gui.StorageScreenBase;
 import net.p3pp3rf1y.sophisticatedcore.client.gui.UpgradeSettingsTab;
 import net.p3pp3rf1y.sophisticatedcore.client.gui.utils.Dimension;
+import net.p3pp3rf1y.sophisticatedcore.client.gui.utils.GuiHelper;
 import net.p3pp3rf1y.sophisticatedcore.client.gui.utils.Position;
 
 import java.util.ArrayList;
@@ -41,7 +42,6 @@ public class ClassifyTab extends UpgradeSettingsTab<ClassifyUpgradeContainer> {
     private static final int COLOR_ROW_BG = 0xFF8E8E8E;
     private static final int COLOR_ROW_HL = 0xFFB8B8B8;
     private static final int COLOR_ROW_SH = 0xFF5E5E5E;
-    private static final int COLOR_ICON_BOX = 0xFF4A4A4A;
     private static final int COLOR_LABEL = 0xFF1E1E1E;
     private static final int COLOR_LABEL_DIM = 0xFF5A5A5A;
     private static final int COLOR_HANDLE = 0xFF3C3C3C;
@@ -164,7 +164,9 @@ public class ClassifyTab extends UpgradeSettingsTab<ClassifyUpgradeContainer> {
     }
 
     private int rowIconX() {
-        return rowX() + 3;
+        // 图标槽位坐标：槽位背景从 rowX() 起画（见 drawList），所以这里比行左缘缩进 1px，
+        // 让 18×18 的槽位背景正好和行背景左缘齐平，不留额外的空白带。
+        return rowX() + 1;
     }
 
     private int rowIconY(int visRow) {
@@ -218,10 +220,12 @@ public class ClassifyTab extends UpgradeSettingsTab<ClassifyUpgradeContainer> {
             graphics.fill(x, y, x + w, y + 1, COLOR_ROW_HL);
             graphics.fill(x, y + h - 1, x + w, y + h, COLOR_ROW_SH);
 
-            // 图标框 18×18；物品画的是「该模组创造标签页的图标」（样本槽自身的渲染已被隐藏）
+            // 图标格：直接用精妙背包自己的槽位背景贴图（18×18，和原版设置页 / 背包网格里的槽位同款）。
+            // 背景左上角比槽位坐标外扩 1px，物品正好落在凹槽内居中 —— 原来手绘的深灰方块
+            // 起点和宽度都没按这套几何算，所以和图标对不上。
             int iconX = rowIconX();
             int iconY = rowIconY(vis);
-            graphics.fill(iconX - 2, y, iconX + CELL - 2, y + h, COLOR_ICON_BOX);
+            GuiHelper.renderSlotsBackground(graphics, iconX - 1, iconY - 1, 1, 1);
 
             int handleX = x + w - HANDLE_W - 3;
             int deleteX = handleX - DELETE_W - 1;
