@@ -67,6 +67,37 @@ public class ClassifyTab extends UpgradeSettingsTab<ClassifyUpgradeContainer> {
         this.openTabDimension = new Dimension(TAB_WIDTH, TAB_HEIGHT);
     }
 
+    // ---------------------------------------------------------------- 位置
+
+    /**
+     * 展开后整体向左偏移的像素数。
+     * <p>
+     * SB 把页签的 x 贴着背包面板内缘放，左侧两个圆角正好被面板边框压掉，看起来是直角；
+     * 原版页签同样带圆角，只是位置更靠左、圆角露在面板外。这里跟着左移，把左侧圆角让出来。
+     */
+    private static final int X_SHIFT = 6;
+
+    /** SB 给的原始 X（未偏移）。每次打开都从它重新算，避免反复开关导致偏移累积。 */
+    private int baseX = Integer.MIN_VALUE;
+
+    @Override
+    protected void onTabOpen() {
+        if (baseX == Integer.MIN_VALUE) {
+            baseX = getX();
+        }
+        setPosition(new Position(baseX - X_SHIFT, getY()));
+        super.onTabOpen();
+    }
+
+    @Override
+    protected void onTabClose() {
+        // 收起时要回到原位，否则右侧那条竖着的小页签会整体左移，和背包上的图标对不上
+        if (baseX != Integer.MIN_VALUE) {
+            setPosition(new Position(baseX, getY()));
+        }
+        super.onTabClose();
+    }
+
     // ---------------------------------------------------------------- 布局
 
     private int listTop() {
