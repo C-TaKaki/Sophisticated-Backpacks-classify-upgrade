@@ -94,6 +94,11 @@ public class ClassifyUpgradeContainer extends UpgradeContainerBase<ClassifyUpgra
         return ClassifyUpgradeWrapper.modWhitelist(getSampleStacks());
     }
 
+    /** 升级是否启用（升级槽左侧的那个开关）。关掉时背包网格恢复原版排版，不做分类。 */
+    public boolean isUpgradeEnabled() {
+        return upgradeWrapper.isEnabled();
+    }
+
     public int getView() {
         return upgradeWrapper.getView();
     }

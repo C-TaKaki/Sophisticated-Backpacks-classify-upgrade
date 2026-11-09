@@ -15,7 +15,6 @@ import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Unique;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
-import org.spongepowered.asm.mixin.injection.Redirect;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 
@@ -54,7 +53,10 @@ public abstract class StorageScreenBaseMixin {
 
     @Inject(method = "render", at = @At("HEAD"))
     private void sbaddon$applyLayout(GuiGraphics graphics, int mouseX, int mouseY, float partialTick, CallbackInfo ci) {
+        // 每帧先清空：升级被关掉 / 被拿掉时这里会提前 return，
+        // 留着上一帧的布局会导致 SB 的格子背景被取消绘制，界面上出现空白行
         sbaddon$banners = List.of();
+        sbaddon$placements = List.of();
         sbaddon$maxScroll = 0;
 
         StorageScreenBase<?> self = (StorageScreenBase<?>) (Object) this;
@@ -64,6 +66,10 @@ public abstract class StorageScreenBaseMixin {
         }
         ClassifyUpgradeContainer container = sbaddon$findContainer(menu);
         if (container == null) {
+            return;
+        }
+        // 升级被左侧开关关掉时按原版网格排版，不做任何分类
+        if (!container.isUpgradeEnabled()) {
             return;
         }
 
@@ -126,19 +132,6 @@ public abstract class StorageScreenBaseMixin {
         if (!sbaddon$placements.isEmpty()) {
             ci.cancel();
         }
-    }
-
-    /**
-     * 升级槽左侧的「启用/停用」开关：分类升级没有开关概念，把它自己的那个开关去掉。
-     * 只影响本模组的升级，其它升级的开关照旧。
-     */
-    @Redirect(method = "addUpgradeSwitches", at = @At(value = "INVOKE",
-            target = "Lnet/p3pp3rf1y/sophisticatedcore/common/gui/StorageContainerMenuBase;canDisableUpgrade(I)Z"))
-    private boolean sbaddon$hideOwnUpgradeSwitch(StorageContainerMenuBase<?> menu, int upgradeSlot) {
-        if (menu.getUpgradeContainers().get(upgradeSlot) instanceof ClassifyUpgradeContainer) {
-            return false;
-        }
-        return menu.canDisableUpgrade(upgradeSlot);
     }
 
     /**
