@@ -38,6 +38,20 @@ public class ClassifyUpgradeItem extends UpgradeItemBase<ClassifyUpgradeWrapper>
         super(LIMITS);
     }
 
+    /** TODO 调试用，定位「无法插入升级槽」后可删。 */
+    @Override
+    public net.p3pp3rf1y.sophisticatedcore.common.gui.UpgradeSlotChangeResult canAddUpgradeTo(
+            net.p3pp3rf1y.sophisticatedcore.api.IStorageWrapper storageWrapper,
+            net.minecraft.world.item.ItemStack upgradeStack, boolean firstLevelStorage, boolean isClientSide) {
+        var result = super.canAddUpgradeTo(storageWrapper, upgradeStack, firstLevelStorage, isClientSide);
+        com.huanj.sbaddon.SBAddon.LOGGER.info(
+                "[sbaddon] canAddUpgradeTo: storageType={}, firstLevel={}, client={}, count={}, perStorage={}, result={} {}",
+                storageWrapper.getStorageType(), firstLevelStorage, isClientSide, upgradeStack.getCount(),
+                getUpgradesPerStorage(storageWrapper.getStorageType()), result.successful(),
+                result.getErrorMessage().map(c -> c.getString()).orElse("-"));
+        return result;
+    }
+
     @Override
     public UpgradeType<ClassifyUpgradeWrapper> getType() {
         UpgradeType<ClassifyUpgradeWrapper> type = ClassifyUpgrades.UPGRADE_TYPE;

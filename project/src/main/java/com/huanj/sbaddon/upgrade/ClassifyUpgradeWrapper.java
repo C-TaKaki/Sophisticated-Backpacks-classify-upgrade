@@ -34,6 +34,7 @@ public class ClassifyUpgradeWrapper extends UpgradeWrapperBase<ClassifyUpgradeWr
 
     public ClassifyUpgradeWrapper(IStorageWrapper storageWrapper, ItemStack upgradeStack, Consumer<ItemStack> upgradeSaveHandler) {
         super(storageWrapper, upgradeStack, upgradeSaveHandler);
+        com.huanj.sbaddon.SBAddon.LOGGER.info("[sbaddon] wrapper 已创建（item={}）", upgradeStack.getItem());
     }
 
     // ---------------------------------------------------------------- 物品 NBT 读写

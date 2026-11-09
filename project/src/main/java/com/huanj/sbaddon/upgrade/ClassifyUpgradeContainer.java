@@ -46,6 +46,8 @@ public class ClassifyUpgradeContainer extends UpgradeContainerBase<ClassifyUpgra
             // 初始位置放在屏幕外，页签真正打开时才摆进来
             slots.add(new SampleSlot(samples, i, -10000, -10000));
         }
+
+        com.huanj.sbaddon.SBAddon.LOGGER.info("[sbaddon] 容器已创建 id={}，样本槽 {} 个", containerId, slots.size());
     }
 
     private void persistSamples() {
