@@ -19,8 +19,8 @@ import java.util.List;
  * 分类配置页：列表形式。
  * <p>
  * 每一行 = 一个已配置的模组条目：左侧图标（该行的样本槽物品）+ 中间模组名 + 右侧拖拽手柄。
- * 行序即背包网格里的分类顺序；拖手柄可调序。末尾保留一个空行用于拖入新增。
- * 顶部「+ / -」：加一条（把手上物品作为样本）、删最后一条（物品退回玩家背包）。
+ * 行序即背包网格里的分类顺序；拖手柄可调序。条目数不固定，超出可视区时右侧出滚动条。
+ * 末尾始终保留一个空行用于拖入新增（样本槽是幽灵槽，放入不消耗物品）。
  */
 public class ClassifyTab extends UpgradeSettingsTab<ClassifyUpgradeContainer> {
 
@@ -30,11 +30,11 @@ public class ClassifyTab extends UpgradeSettingsTab<ClassifyUpgradeContainer> {
     private static final int TITLE_H = 13;
     private static final int PAD = 4;
     private static final int ROW_H = 20;
-    private static final int BTN = 11;
     private static final int HANDLE_W = 9;
     private static final int CELL = 18;
     private static final int BAR_H = 11;
     private static final int FOOTER_H = 34;
+    private static final int SCROLLBAR_W = 3;
 
     private static final int COLOR_ROW_BG = 0xFF8E8E8E;
     private static final int COLOR_ROW_HL = 0xFFB8B8B8;
@@ -45,13 +45,9 @@ public class ClassifyTab extends UpgradeSettingsTab<ClassifyUpgradeContainer> {
     private static final int COLOR_BAR_BTN = 0xFF8A8A8A;
     private static final int COLOR_HANDLE = 0xFF3C3C3C;
 
-    /** 渲染期缓存的命中区：rowHits[i] = {行内绝对行号, 是否条目, x, y, w, h, handleX}。 */
+    /** 渲染期缓存的命中区：rowHits[i] = {行号, 是否条目, x, y, w, h, handleX}。 */
     private final List<int[]> rowHits = new ArrayList<>();
 
-    private int plusX;
-    private int plusY;
-    private int minusX;
-    private int minusY;
     private int sortButtonX;
     private int sortButtonY;
     private int sortButtonW;
@@ -70,7 +66,7 @@ public class ClassifyTab extends UpgradeSettingsTab<ClassifyUpgradeContainer> {
     // ---------------------------------------------------------------- 布局
 
     private int listTop() {
-        return getY() + TITLE_H + 16;
+        return getY() + TITLE_H + 4;
     }
 
     private int rowsVisible() {
@@ -102,7 +98,8 @@ public class ClassifyTab extends UpgradeSettingsTab<ClassifyUpgradeContainer> {
 
     /** 行 -> 样本槽索引；末尾多一行空行（用于拖入新增）。 */
     private List<Integer> rows() {
-        List<Integer> rows = new ArrayList<>(usedSlots());
+        List<Integer> used = usedSlots();
+        List<Integer> rows = new ArrayList<>(used);
         int empty = firstEmptySlot();
         if (empty >= 0) {
             rows.add(empty);
@@ -115,18 +112,29 @@ public class ClassifyTab extends UpgradeSettingsTab<ClassifyUpgradeContainer> {
         layoutSlots();
     }
 
+    /**
+     * 页签关闭时把槽位彻底移出屏幕。
+     * SB 默认只把 x 改成 -2000、保留 y，配合我们每帧的布局会留下残影，这里两个坐标一起清。
+     */
+    @Override
+    protected void moveSlotsOutOfView() {
+        for (Slot slot : getContainer().getSlots()) {
+            slot.x = -10000;
+            slot.y = -10000;
+        }
+    }
+
     /** 把每个样本槽摆到它所在行的图标位置上；不在可见范围内的丢到屏幕外。 */
     private void layoutSlots() {
-        ClassifyUpgradeContainer container = getContainer();
-        List<Slot> slots = container.getSlots();
+        List<Slot> slots = getContainer().getSlots();
         int guiLeft = screen.getGuiLeft();
         int guiTop = screen.getGuiTop();
         List<Integer> rows = rows();
         int visible = rowsVisible();
 
-        for (int i = 0; i < slots.size(); i++) {
-            slots.get(i).x = -10000;
-            slots.get(i).y = -10000;
+        for (Slot slot : slots) {
+            slot.x = -10000;
+            slot.y = -10000;
         }
         for (int r = scrollRow; r < rows.size() && r < scrollRow + visible; r++) {
             int slotIndex = rows.get(r);
@@ -144,7 +152,7 @@ public class ClassifyTab extends UpgradeSettingsTab<ClassifyUpgradeContainer> {
     }
 
     private int rowWidth() {
-        return getWidth() - 6;
+        return getWidth() - 6 - SCROLLBAR_W - 2;
     }
 
     private int rowY(int visRow) {
@@ -164,47 +172,35 @@ public class ClassifyTab extends UpgradeSettingsTab<ClassifyUpgradeContainer> {
     @Override
     protected void renderWidget(GuiGraphics graphics, int mouseX, int mouseY, float partialTick) {
         super.renderWidget(graphics, mouseX, mouseY, partialTick);
+        if (!getContainer().isOpen()) {
+            // 页签收起时不再排版，否则槽位会被重新摆回面板位置，物品就"漏"到界面外
+            return;
+        }
 
-        int maxScroll = Math.max(0, rows().size() - rowsVisible());
+        List<Integer> rows = rows();
+        int visible = rowsVisible();
+        int maxScroll = Math.max(0, rows.size() - visible);
         scrollRow = Math.min(Math.max(scrollRow, 0), maxScroll);
 
         layoutSlots();
         rowHits.clear();
 
-        drawButtons(graphics, mouseX, mouseY);
-        drawList(graphics, mouseX, mouseY);
+        drawList(graphics, mouseX, mouseY, rows);
+        drawScrollbar(graphics, rows.size(), visible);
         drawFooter(graphics, mouseX, mouseY);
     }
 
-    private void drawButtons(GuiGraphics graphics, int mouseX, int mouseY) {
-        plusX = getX() + PAD + 1;
-        plusY = getY() + TITLE_H + 2;
-        minusX = plusX + BTN + 3;
-        minusY = plusY;
-
-        drawSmallButton(graphics, plusX, plusY, "+", mouseX, mouseY);
-        drawSmallButton(graphics, minusX, minusY, "-", mouseX, mouseY);
-    }
-
-    private void drawSmallButton(GuiGraphics graphics, int x, int y, String glyph, int mouseX, int mouseY) {
-        boolean hovered = inside(mouseX, mouseY, x, y, BTN, BTN);
-        graphics.fill(x, y, x + BTN, y + BTN, hovered ? 0xFFB4C8A4 : 0xFF9A9A9A);
-        graphics.fill(x, y, x + BTN, y + 1, 0xFFE0E0E0);
-        graphics.fill(x, y + BTN - 1, x + BTN, y + BTN, 0xFF5E5E5E);
-        graphics.drawString(font, glyph, x + (BTN - font.width(glyph)) / 2 + 1, y + 2, 0xFF202020, false);
-    }
-
-    private void drawList(GuiGraphics graphics, int mouseX, int mouseY) {
-        List<Integer> rows = rows();
+    private void drawList(GuiGraphics graphics, int mouseX, int mouseY, List<Integer> rows) {
         int visible = rowsVisible();
         int x = rowX();
         int w = rowWidth();
         int h = ROW_H - 2;
+        int usedCount = usedSlots().size();
 
         for (int r = scrollRow; r < rows.size() && r < scrollRow + visible; r++) {
             int vis = r - scrollRow;
             int y = rowY(vis);
-            boolean entry = r < usedSlots().size();
+            boolean entry = r < usedCount;
             boolean hovered = inside(mouseX, mouseY, x, y, w, h);
             boolean dragging = entry && draggingRow == r;
 
@@ -234,6 +230,22 @@ public class ClassifyTab extends UpgradeSettingsTab<ClassifyUpgradeContainer> {
 
             rowHits.add(new int[]{r, entry ? 1 : 0, x, y, w, h, handleX});
         }
+    }
+
+    /** 内容超出可视行数时，右侧画一条滚动条（轨道 + 滑块）。 */
+    private void drawScrollbar(GuiGraphics graphics, int totalRows, int visible) {
+        if (totalRows <= visible) {
+            return;
+        }
+        int x = getX() + getWidth() - SCROLLBAR_W - 2;
+        int top = listTop();
+        int trackH = visible * ROW_H - 2;
+        graphics.fill(x, top, x + SCROLLBAR_W, top + trackH, 0xFF6A6A6A);
+
+        int thumbH = Math.max(10, trackH * visible / totalRows);
+        int maxScroll = totalRows - visible;
+        int thumbY = top + (trackH - thumbH) * Math.min(scrollRow, maxScroll) / Math.max(1, maxScroll);
+        graphics.fill(x, thumbY, x + SCROLLBAR_W, thumbY + thumbH, 0xFFD8D8D8);
     }
 
     private void drawHandle(GuiGraphics graphics, int x, int y, int h, boolean active) {
@@ -294,17 +306,6 @@ public class ClassifyTab extends UpgradeSettingsTab<ClassifyUpgradeContainer> {
         }
         if (button != 0) {
             return false;
-        }
-
-        if (inside(mouseX, mouseY, plusX, plusY, BTN, BTN)) {
-            // 把手上的物品加为一条新条目（服务端执行，物品从光标移入样本槽）
-            getContainer().sendDataToServer(ClassifyUpgradeContainer::addHeldTag);
-            return true;
-        }
-        if (inside(mouseX, mouseY, minusX, minusY, BTN, BTN)) {
-            // 删掉最后一条，物品退回玩家背包
-            getContainer().sendDataToServer(ClassifyUpgradeContainer::removeLastTag);
-            return true;
         }
         if (sortButtonW > 0 && inside(mouseX, mouseY, sortButtonX, sortButtonY, sortButtonW, BAR_H - 1)) {
             SortBy candidate = getContainer().getFallbackSort().next();

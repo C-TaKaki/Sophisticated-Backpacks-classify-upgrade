@@ -6,7 +6,7 @@ import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.ItemStack;
 import net.neoforged.neoforge.items.ItemStackHandler;
 import net.neoforged.neoforge.items.SlotItemHandler;
-import net.p3pp3rf1y.sophisticatedcore.common.gui.StorageContainerMenuBase;
+import net.p3pp3rf1y.sophisticatedcore.common.gui.IFilterSlot;
 import net.p3pp3rf1y.sophisticatedcore.common.gui.UpgradeContainerBase;
 import net.p3pp3rf1y.sophisticatedcore.common.gui.UpgradeContainerType;
 import net.p3pp3rf1y.sophisticatedcore.common.gui.SortBy;
@@ -22,14 +22,14 @@ import java.util.List;
  */
 public class ClassifyUpgradeContainer extends UpgradeContainerBase<ClassifyUpgradeWrapper, ClassifyUpgradeContainer> {
 
-    public static final int SAMPLE_COLUMNS = 5;
-    public static final int SAMPLE_ROWS = 3;
-    public static final int SAMPLE_COUNT = SAMPLE_COLUMNS * SAMPLE_ROWS;
+    /**
+     * 样本槽容量。列表本身按内容增长，这里只是上限：
+     * 槽位必须在菜单构造时一次性建好（客户端/服务端索引要一致），所以给一个足够大的池子。
+     */
+    public static final int SAMPLE_COUNT = 64;
 
     private static final String TAG_SORT = "Sort";
     private static final String TAG_VIEW = "View";
-    private static final String TAG_ADD_HELD = "AddHeld";
-    private static final String TAG_REMOVE_LAST = "RemoveLast";
     private static final String TAG_ORDER = "Order";
 
     private final SampleHandler samples;
@@ -92,50 +92,6 @@ public class ClassifyUpgradeContainer extends UpgradeContainerBase<ClassifyUpgra
         }
     }
 
-    /** 「+」：把玩家光标上的物品取 1 个作为新条目。仅服务端执行。 */
-    private void addHeldSample() {
-        if (player.level().isClientSide()) {
-            return;
-        }
-        if (!(player.containerMenu instanceof StorageContainerMenuBase<?> menu)) {
-            return;
-        }
-        ItemStack carried = menu.getCarried();
-        if (carried.isEmpty()) {
-            return;
-        }
-        int empty = -1;
-        for (int i = 0; i < samples.getSlots(); i++) {
-            if (samples.getStackInSlot(i).isEmpty()) {
-                empty = i;
-                break;
-            }
-        }
-        if (empty < 0) {
-            return;
-        }
-        samples.setStackInSlot(empty, carried.copyWithCount(1));
-        carried.shrink(1);
-        menu.setCarried(carried.isEmpty() ? ItemStack.EMPTY : carried);
-    }
-
-    /** 「-」：删掉最后一条，物品退回玩家背包（背包满则掉落）。仅服务端执行。 */
-    private void removeLastSample() {
-        if (player.level().isClientSide()) {
-            return;
-        }
-        for (int i = samples.getSlots() - 1; i >= 0; i--) {
-            ItemStack stack = samples.getStackInSlot(i);
-            if (!stack.isEmpty()) {
-                samples.setStackInSlot(i, ItemStack.EMPTY);
-                ItemStack back = stack.copy();
-                if (!player.getInventory().add(back)) {
-                    player.drop(back, false);
-                }
-                return;
-            }
-        }
-    }
 
     public List<String> getModWhitelist() {
         return ClassifyUpgradeWrapper.modWhitelist(getSampleStacks());
@@ -173,12 +129,6 @@ public class ClassifyUpgradeContainer extends UpgradeContainerBase<ClassifyUpgra
         if (tag.contains(TAG_VIEW)) {
             upgradeWrapper.setView(tag.getInt(TAG_VIEW));
         }
-        if (tag.getBoolean(TAG_ADD_HELD)) {
-            addHeldSample();
-        }
-        if (tag.getBoolean(TAG_REMOVE_LAST)) {
-            removeLastSample();
-        }
         if (tag.contains(TAG_ORDER)) {
             applyOrder(tag.getIntArray(TAG_ORDER));
         }
@@ -197,26 +147,20 @@ public class ClassifyUpgradeContainer extends UpgradeContainerBase<ClassifyUpgra
         return tag;
     }
 
-    public static CompoundTag addHeldTag() {
-        CompoundTag tag = new CompoundTag();
-        tag.putBoolean(TAG_ADD_HELD, true);
-        return tag;
-    }
-
-    public static CompoundTag removeLastTag() {
-        CompoundTag tag = new CompoundTag();
-        tag.putBoolean(TAG_REMOVE_LAST, true);
-        return tag;
-    }
-
     public static CompoundTag reorderTag(int[] slotOrder) {
         CompoundTag tag = new CompoundTag();
         tag.putIntArray(TAG_ORDER, slotOrder);
         return tag;
     }
 
-    /** 样本槽：可以拖入，也可以用空手点出来（防止配错了清不掉）。 */
-    public static class SampleSlot extends SlotItemHandler {
+    /**
+     * 样本槽。
+     * <p>
+     * 实现 {@link IFilterSlot} 是关键：SB 的 {@code StorageContainerMenuBase.clicked} 对
+     * 「升级设置区 + IFilterSlot」的槽位走幽灵语义 —— 复制光标物品 1 个放进去，
+     * <b>不扣玩家手上的数量</b>。没有这个接口，点一下就会真消耗一个物品。
+     */
+    public static class SampleSlot extends SlotItemHandler implements IFilterSlot {
         public SampleSlot(ItemStackHandler handler, int index, int x, int y) {
             super(handler, index, x, y);
         }
