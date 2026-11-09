@@ -1,4 +1,5 @@
-# Sync external mods, then launch the NeoForge dev client (game dir: project\run)
+# Sync external mods, then launch the NeoForge dev client (game dir: project\run).
+# 关闭游戏窗口后会把本局启动的 JVM / Gradle 守护进程一并清理干净，脚本返回时不留后台进程。
 $ErrorActionPreference = 'Stop'
 $root = $PSScriptRoot
 & (Join-Path $root 'sync-mods.ps1')
@@ -7,6 +8,26 @@ $env:JAVA_HOME = Join-Path $root 'tools\jdk21'
 $env:GRADLE_USER_HOME = Join-Path $root 'gradle-home'
 $env:Path = "$env:JAVA_HOME\bin;$env:Path"
 
+$runDir = Join-Path $root 'project\run'
+
+# 只匹配「开发客户端」进程：运行目录是 project\run，或命令行里带 NeoForge 开发启动器 / 客户端主类。
+# 这样不会误杀本机其它 java 程序（服务端、IDE、其它 Gradle 构建）。
+function Get-DevClientJava {
+    Get-CimInstance Win32_Process -Filter "Name='java.exe' OR Name='javaw.exe'" -ErrorAction SilentlyContinue |
+        Where-Object {
+            $cmd = $_.CommandLine
+            $cmd -and (
+                $cmd -like "*$runDir*" -or
+                $cmd -like "*net.neoforged.devlaunch*" -or
+                $cmd -like "*net.minecraft.client.main.Main*"
+            )
+        }
+}
+
+# 启动前已经存在的进程（例如另一个会话里的客户端）不动
+$preexisting = @{}
+Get-DevClientJava | ForEach-Object { $preexisting[$_.ProcessId] = $true }
+
 Push-Location (Join-Path $root 'project')
 try {
     & .\gradlew.bat runClient --console=plain @args
@@ -14,4 +35,35 @@ try {
 } finally {
     Pop-Location
 }
+
+# 1) gradlew 已经返回，但游戏 JVM 可能还在收尾（写存档 / 释放资源），给它 10 秒自然退出
+$deadline = (Get-Date).AddSeconds(10)
+$left = @(Get-DevClientJava | Where-Object { -not $preexisting.ContainsKey($_.ProcessId) })
+while ($left.Count -gt 0 -and (Get-Date) -lt $deadline) {
+    Start-Sleep -Milliseconds 500
+    $left = @(Get-DevClientJava | Where-Object { -not $preexisting.ContainsKey($_.ProcessId) })
+}
+
+# 2) 超时仍未退出的强制结束
+foreach ($p in $left) {
+    Write-Host "[run-client] 结束残留游戏进程 PID=$($p.ProcessId)"
+    try { Stop-Process -Id $p.ProcessId -Force -ErrorAction Stop } catch { }
+}
+
+# 3) 停掉 Gradle 守护进程：它是常驻 java 进程，不关掉同样算后台残留
+Push-Location (Join-Path $root 'project')
+try {
+    & .\gradlew.bat --stop 2>&1 | Out-Null
+} catch {
+    # gradle 向 stderr 写日志会触发 NativeCommandError，忽略即可，清理逻辑不受影响
+} finally {
+    Pop-Location
+}
+
+# 4) 兜底确认：还有残留就再杀一次，保证脚本返回时干净
+$remain = @(Get-DevClientJava | Where-Object { -not $preexisting.ContainsKey($_.ProcessId) })
+foreach ($p in $remain) {
+    try { Stop-Process -Id $p.ProcessId -Force -ErrorAction Stop } catch { }
+}
+
 exit $code

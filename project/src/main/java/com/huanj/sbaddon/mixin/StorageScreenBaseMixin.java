@@ -207,8 +207,11 @@ public abstract class StorageScreenBaseMixin {
         Font font = Minecraft.getInstance().font;
 
         for (ClassifyLayout.Banner banner : sbaddon$banners) {
-            int x = left + banner.x();
-            int y = top + banner.y();
+            // 格子背景是以「槽位坐标 - 1」为左上角画的 18×18（见 drawAlignedSlotBg），
+            // 横幅这里同样外扩 1px，才会和整行格子的边框严丝合缝对齐；
+            // 不外扩的话横幅会整体右移、下移 1px，视觉上就是"标签没对齐格子"。
+            int x = left + banner.x() - 1;
+            int y = top + banner.y() - 1;
             int right = x + banner.width();
             int bottom = y + ClassifyLayout.CELL;
             // 不透明整行填充：把背景贴图里的格子边框线彻底盖掉，标签行不留任何框线
