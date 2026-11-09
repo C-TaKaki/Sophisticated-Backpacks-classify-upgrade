@@ -133,8 +133,11 @@ public abstract class StorageScreenBaseMixin {
             int x = left + banner.x();
             int y = top + banner.y();
             int right = x + banner.width();
-            graphics.fill(x, y, right, y + 17, 0x66202428);
-            graphics.fill(x, y + 16, right, y + 17, 0x664A5560);
+            int bottom = y + ClassifyLayout.CELL;
+            // 不透明整行填充：把背景贴图里的格子边框线彻底盖掉，标签行不留任何框线
+            graphics.fill(x, y, right, bottom, 0xFF2F353C);
+            graphics.fill(x, y, right, y + 1, 0xFF454E57);
+            graphics.fill(x, bottom - 1, right, bottom, 0xFF23282D);
             if (!banner.icon().isEmpty()) {
                 graphics.renderItem(banner.icon(), x + 1, y + 1);
             }

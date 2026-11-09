@@ -21,14 +21,15 @@ import java.util.function.Predicate;
  *   ┌──────────────────────────────────┐
  *   │ [图标] 模组名                      │  ← 横幅占满一整行
  *   ├──────────────────────────────────┤
- *   │ [物品][物品][物品]...              │  ← 该组物品按行流式排
+ *   │ [物品][物品][物品][空][空]...      │  ← 该组物品按行流式排，行尾空格也是真实槽位
  *   └──────────────────────────────────┘
  * </pre>
+ * 组内行尾的空格会填上真实空槽，玩家把物品放进去后下一帧自动归类到对应组。
  * 超出可视行数的内容随滚动偏移移动，滚出范围的槽位直接隐藏。
  */
 public final class ClassifyLayout {
 
-    private static final int CELL = 18;
+    public static final int CELL = 18;
 
     private ClassifyLayout() {
     }
@@ -43,6 +44,10 @@ public final class ClassifyLayout {
         public static Result empty() {
             return new Result(List.of(), List.of(), 0);
         }
+    }
+
+    /** 内容行内未被物品占用的单元格，用来摆放空槽。 */
+    private record Cell(int row, int col) {
     }
 
     public static Result compute(StorageContainerMenuBase<?> menu, ClassifyUpgradeContainer container,
@@ -62,11 +67,18 @@ public final class ClassifyLayout {
         }
         List<Integer> fallback = new ArrayList<>();
 
+        boolean[] occupied = new boolean[storageSlots];
         for (int i = 0; i < storageSlots; i++) {
             ItemStack stack = menu.getSlot(i).getItem();
-            if (stack.isEmpty() || (filter != null && !filter.test(stack))) {
+            if (stack.isEmpty()) {
                 continue;
             }
+            if (filter != null && !filter.test(stack)) {
+                // 被搜索过滤掉的物品：占住槽位但不进任何组（保持隐藏），也不能当空槽用
+                occupied[i] = true;
+                continue;
+            }
+            occupied[i] = true;
             String namespace = BuiltInRegistries.ITEM.getKey(stack.getItem()).getNamespace();
             List<Integer> bucket = buckets.get(namespace);
             if (bucket != null) {
@@ -80,7 +92,7 @@ public final class ClassifyLayout {
 
         List<Banner> banners = new ArrayList<>();
         List<Placement> placements = new ArrayList<>();
-        List<Integer> used = new ArrayList<>();
+        List<Cell> gaps = new ArrayList<>();
 
         int row = 0;
         for (Map.Entry<String, List<Integer>> entry : buckets.entrySet()) {
@@ -88,57 +100,83 @@ public final class ClassifyLayout {
                 continue;
             }
             row = placeGroup(row, cols, rows, scrollRows, entry.getKey(), iconFor(samples, entry.getKey()),
-                    entry.getValue(), originX, originY, banners, placements, used);
+                    entry.getValue(), originX, originY, banners, placements, gaps);
         }
         if (!fallback.isEmpty()) {
-            row = placeGroup(row, cols, rows, scrollRows, "", iconFor(samples, null),
-                    fallback, originX, originY, banners, placements, used);
+            String fallbackNamespace = null;
+            row = placeGroup(row, cols, rows, scrollRows, "", iconFor(samples, fallbackNamespace),
+                    fallback, originX, originY, banners, placements, gaps);
         }
         int contentRows = row;
 
-        // 剩余空槽跟在内容后面；滚出可视区的一律不改坐标（保持隐藏）
-        boolean[] taken = new boolean[storageSlots];
-        for (int index : used) {
-            taken[index] = true;
-        }
-        int cell = contentRows * cols;
+        List<Integer> emptySlots = new ArrayList<>();
         for (int i = 0; i < storageSlots; i++) {
-            if (taken[i]) {
-                continue;
+            if (!occupied[i]) {
+                emptySlots.add(i);
             }
-            int r = cell / cols - scrollRows;
-            int c = cell % cols;
-            if (r >= 0 && r < rows) {
-                placements.add(new Placement(i, originX + c * CELL, originY + r * CELL));
-            }
-            cell++;
         }
-        return new Result(banners, placements, contentRows);
+
+        // 1) 先用空槽填满内容行内的空格，让每个可见格子都能放东西
+        int cursor = 0;
+        for (Cell gap : gaps) {
+            if (cursor >= emptySlots.size()) {
+                break;
+            }
+            int slotIndex = emptySlots.get(cursor++);
+            int r = gap.row() - scrollRows;
+            if (r >= 0 && r < rows) {
+                placements.add(new Placement(slotIndex, originX + gap.col() * CELL, originY + r * CELL));
+            }
+        }
+
+        // 2) 剩下的空槽顺着内容之后继续铺
+        int tailRow = contentRows;
+        int tailCol = 0;
+        while (cursor < emptySlots.size()) {
+            int slotIndex = emptySlots.get(cursor++);
+            int r = tailRow - scrollRows;
+            if (r >= 0 && r < rows) {
+                placements.add(new Placement(slotIndex, originX + tailCol * CELL, originY + r * CELL));
+            }
+            tailCol++;
+            if (tailCol >= cols) {
+                tailCol = 0;
+                tailRow++;
+            }
+        }
+        int totalRows = tailCol > 0 ? tailRow + 1 : tailRow;
+
+        return new Result(banners, placements, totalRows);
     }
 
     private static int placeGroup(int row, int cols, int rows, int scrollRows, String namespace, ItemStack icon,
                                   List<Integer> items, int originX, int originY,
-                                  List<Banner> banners, List<Placement> placements, List<Integer> used) {
+                                  List<Banner> banners, List<Placement> placements, List<Cell> gaps) {
         Component label = namespace.isEmpty()
                 ? Component.translatable("gui.sbaddon.classify.fallback")
                 : ModNames.displayName(namespace);
 
         int bannerRow = row - scrollRows;
         if (bannerRow >= 0 && bannerRow < rows) {
-            banners.add(new Banner(originX, originY + bannerRow * CELL, cols * CELL - 1, icon, label));
+            banners.add(new Banner(originX, originY + bannerRow * CELL, cols * CELL, icon, label));
         }
         row++;
 
-        for (int k = 0; k < items.size(); k++) {
-            int r = row + k / cols - scrollRows;
+        int itemRows = (items.size() + cols - 1) / cols;
+        for (int k = 0; k < itemRows * cols; k++) {
+            int r = row + k / cols;
             int c = k % cols;
-            int slotIndex = items.get(k);
-            used.add(slotIndex);
-            if (r >= 0 && r < rows) {
-                placements.add(new Placement(slotIndex, originX + c * CELL, originY + r * CELL));
+            if (k >= items.size()) {
+                // 该行剩余空格：先记下来，稍后用空槽填
+                gaps.add(new Cell(r, c));
+                continue;
+            }
+            int viewRow = r - scrollRows;
+            if (viewRow >= 0 && viewRow < rows) {
+                placements.add(new Placement(items.get(k), originX + c * CELL, originY + viewRow * CELL));
             }
         }
-        return row + (items.size() + cols - 1) / cols;
+        return row + itemRows;
     }
 
     private static ItemStack iconFor(List<ItemStack> samples, String namespace) {
