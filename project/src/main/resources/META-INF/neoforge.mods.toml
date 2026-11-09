@@ -38,3 +38,8 @@ type = "required"
 versionRange = "[3.26.0,)"
 ordering = "AFTER"
 side = "BOTH"
+
+# 接管背包网格的槽位布局，实现"按模组分块 + 整行分类横幅"
+[[mixins]]
+config = "sbaddon.mixins.json"
+
