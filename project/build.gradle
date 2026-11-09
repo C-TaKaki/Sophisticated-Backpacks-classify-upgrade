@@ -22,6 +22,9 @@ def externalLibs = fileTree(dir: "${rootDir}/../libs", include: ['*.jar'])
 neoForge {
     version = project.neo_version
 
+    // 访问转换器：放开 Slot.x / Slot.y（1.21.1 里是 public final，页签摆放槽位需要可写）
+    accessTransformers = ['src/main/resources/META-INF/accesstransformer.cfg']
+
     runs {
         // 客户端调试：运行目录 project/run
         client {

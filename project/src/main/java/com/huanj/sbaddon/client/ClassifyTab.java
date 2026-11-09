@@ -257,10 +257,11 @@ public class ClassifyTab extends UpgradeSettingsTab<ClassifyUpgradeContainer> {
         // 配置页的兜底排序按钮
         if (getContainer().getView() == ClassifyUpgradeWrapper.VIEW_CONFIG) {
             if (sortHit != null && sortHit.contains(mouseX, mouseY)) {
-                SortBy next = getContainer().getFallbackSort().next();
-                if (next == SortBy.MOD) {
-                    next = next.next();
+                SortBy candidate = getContainer().getFallbackSort().next();
+                if (candidate == SortBy.MOD) {
+                    candidate = candidate.next();
                 }
+                final SortBy next = candidate;
                 getContainer().setFallbackSort(next);
                 getContainer().sendDataToServer(() -> ClassifyUpgradeContainer.sortTag(next));
                 return true;

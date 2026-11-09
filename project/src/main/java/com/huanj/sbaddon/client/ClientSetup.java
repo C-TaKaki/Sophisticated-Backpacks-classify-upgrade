@@ -1,6 +1,8 @@
 package com.huanj.sbaddon.client;
 
 import com.huanj.sbaddon.SBAddon;
+import com.huanj.sbaddon.upgrade.ClassifyUpgradeContainer;
+import com.huanj.sbaddon.upgrade.ClassifyUpgradeWrapper;
 import com.huanj.sbaddon.upgrade.ClassifyUpgrades;
 import net.neoforged.api.distmarker.Dist;
 import net.neoforged.bus.api.SubscribeEvent;
@@ -17,8 +19,9 @@ public final class ClientSetup {
 
     @SubscribeEvent
     public static void onClientSetup(FMLClientSetupEvent event) {
-        event.enqueueWork(() -> UpgradeGuiManager.registerTab(
-                ClassifyUpgrades.CONTAINER_TYPE,
-                (container, position, screen) -> new ClassifyTab(container, position, screen)));
+        event.enqueueWork(() -> UpgradeGuiManager
+                .<ClassifyUpgradeWrapper, ClassifyUpgradeContainer, ClassifyTab>registerTab(
+                        ClassifyUpgrades.CONTAINER_TYPE,
+                        (container, position, screen) -> new ClassifyTab(container, position, screen)));
     }
 }
