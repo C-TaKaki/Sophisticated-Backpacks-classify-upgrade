@@ -159,6 +159,9 @@ public class ClassifyUpgradeContainer extends UpgradeContainerBase<ClassifyUpgra
      * 实现 {@link IFilterSlot} 是关键：SB 的 {@code StorageContainerMenuBase.clicked} 对
      * 「升级设置区 + IFilterSlot」的槽位走幽灵语义 —— 复制光标物品 1 个放进去，
      * <b>不扣玩家手上的数量</b>。没有这个接口，点一下就会真消耗一个物品。
+     * <p>
+     * {@code mayPickup} 恒为 false：槽里的东西只是"图标样本"，一旦允许拿取就等于凭空刷物品。
+     * 删条目走页签行尾的删除按钮（直接改数据并同步），不从槽里取。
      */
     public static class SampleSlot extends SlotItemHandler implements IFilterSlot {
         public SampleSlot(ItemStackHandler handler, int index, int x, int y) {
@@ -173,6 +176,11 @@ public class ClassifyUpgradeContainer extends UpgradeContainerBase<ClassifyUpgra
         @Override
         public boolean mayPlace(ItemStack stack) {
             return !stack.isEmpty();
+        }
+
+        @Override
+        public boolean mayPickup(Player player) {
+            return false;
         }
     }
 

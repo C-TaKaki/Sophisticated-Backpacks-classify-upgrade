@@ -7,7 +7,7 @@
   "gui.sbaddon.classify.empty": "Nothing to show",
   "gui.sbaddon.classify.fallback": "Unclassified",
   "gui.sbaddon.classify.vanilla": "Vanilla",
-  "gui.sbaddon.classify.hint": "Drop on empty row; drag handle to reorder",
+  "gui.sbaddon.classify.hint": "Drop to add; drag handle; x to delete",
   "gui.sbaddon.classify.hint.empty": "Drop an item to add its mod",
   "gui.sbaddon.classify.row.empty": "Drop item here",
   "gui.sbaddon.classify.sort": "Sort: %s",

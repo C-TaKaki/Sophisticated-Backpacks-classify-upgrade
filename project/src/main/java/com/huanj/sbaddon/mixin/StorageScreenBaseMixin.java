@@ -1,5 +1,6 @@
 package com.huanj.sbaddon.mixin;
 
+import com.huanj.sbaddon.client.ClassifyTab;
 import com.huanj.sbaddon.client.layout.ClassifyLayout;
 import com.huanj.sbaddon.upgrade.ClassifyUpgradeContainer;
 import net.minecraft.client.Minecraft;
@@ -146,6 +147,12 @@ public abstract class StorageScreenBaseMixin {
     @Inject(method = "mouseScrolled", at = @At("HEAD"), cancellable = true)
     private void sbaddon$onScroll(double mouseX, double mouseY, double scrollX, double scrollY,
                                   CallbackInfoReturnable<Boolean> cir) {
+        // 先问打开的分类页签：鼠标落在它的列表上就只滚列表，别带动背包网格
+        ClassifyTab tab = ClassifyTab.getActiveTab();
+        if (tab != null && tab.scrollList(mouseX, mouseY, scrollY)) {
+            cir.setReturnValue(true);
+            return;
+        }
         if (sbaddon$maxScroll <= 0) {
             return;
         }

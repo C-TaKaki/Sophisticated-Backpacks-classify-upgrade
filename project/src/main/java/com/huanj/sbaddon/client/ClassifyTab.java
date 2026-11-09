@@ -27,10 +27,13 @@ public class ClassifyTab extends UpgradeSettingsTab<ClassifyUpgradeContainer> {
     public static final int TAB_WIDTH = 150;
     public static final int TAB_HEIGHT = 170;
 
-    private static final int TITLE_H = 13;
+    /** 标题标签画在 y+8、高 9，所以内容区从 y+17 以下开始；再加 4px 呼吸空间。 */
+    private static final int TITLE_H = 17;
     private static final int PAD = 4;
     private static final int ROW_H = 20;
+    private static final int ROW_FILL_H = 18;
     private static final int HANDLE_W = 9;
+    private static final int DELETE_W = 9;
     private static final int CELL = 18;
     private static final int BAR_H = 11;
     private static final int FOOTER_H = 34;
@@ -45,8 +48,15 @@ public class ClassifyTab extends UpgradeSettingsTab<ClassifyUpgradeContainer> {
     private static final int COLOR_BAR_BTN = 0xFF8A8A8A;
     private static final int COLOR_HANDLE = 0xFF3C3C3C;
 
-    /** 渲染期缓存的命中区：rowHits[i] = {行号, 是否条目, x, y, w, h, handleX}。 */
+    /** 渲染期缓存的命中区：rowHits[i] = {行号, 是否条目, x, y, w, h, handleX, deleteX}。 */
     private final List<int[]> rowHits = new ArrayList<>();
+
+    /** 当前打开的页签实例：SB 的屏幕不把滚轮事件派发给子控件，只能由 mixin 转交过来。 */
+    private static ClassifyTab activeTab;
+
+    public static ClassifyTab getActiveTab() {
+        return activeTab;
+    }
 
     private int sortButtonX;
     private int sortButtonY;
@@ -164,7 +174,8 @@ public class ClassifyTab extends UpgradeSettingsTab<ClassifyUpgradeContainer> {
     }
 
     private int rowIconY(int visRow) {
-        return rowY(visRow) + 2;
+        // 行高 18、图标 16，上下各留 1px
+        return rowY(visRow) + 1;
     }
 
     // ---------------------------------------------------------------- 渲染
@@ -174,6 +185,9 @@ public class ClassifyTab extends UpgradeSettingsTab<ClassifyUpgradeContainer> {
         super.renderWidget(graphics, mouseX, mouseY, partialTick);
         if (!getContainer().isOpen()) {
             // 页签收起时不再排版，否则槽位会被重新摆回面板位置，物品就"漏"到界面外
+            if (activeTab == this) {
+                activeTab = null;
+            }
             return;
         }
 
@@ -182,6 +196,7 @@ public class ClassifyTab extends UpgradeSettingsTab<ClassifyUpgradeContainer> {
         int maxScroll = Math.max(0, rows.size() - visible);
         scrollRow = Math.min(Math.max(scrollRow, 0), maxScroll);
 
+        activeTab = this;
         layoutSlots();
         rowHits.clear();
 
@@ -194,7 +209,7 @@ public class ClassifyTab extends UpgradeSettingsTab<ClassifyUpgradeContainer> {
         int visible = rowsVisible();
         int x = rowX();
         int w = rowWidth();
-        int h = ROW_H - 2;
+        int h = ROW_FILL_H;
         int usedCount = usedSlots().size();
 
         for (int r = scrollRow; r < rows.size() && r < scrollRow + visible; r++) {
@@ -209,14 +224,15 @@ public class ClassifyTab extends UpgradeSettingsTab<ClassifyUpgradeContainer> {
             graphics.fill(x, y, x + w, y + 1, COLOR_ROW_HL);
             graphics.fill(x, y + h - 1, x + w, y + h, COLOR_ROW_SH);
 
-            // 图标框（槽位物品由界面绘制在框内）
+            // 图标框 18×18，内部物品 16×16 正好居中（槽位物品由界面绘制在框内）
             int iconX = rowIconX();
             int iconY = rowIconY(vis);
-            graphics.fill(iconX - 2, iconY - 1, iconX + CELL - 2, iconY + CELL - 3, COLOR_ICON_BOX);
+            graphics.fill(iconX - 2, y, iconX + CELL - 2, y + h, COLOR_ICON_BOX);
 
             int handleX = x + w - HANDLE_W - 3;
+            int deleteX = handleX - DELETE_W - 1;
             int nameX = iconX + CELL + 2;
-            int nameW = Math.max(0, handleX - nameX - 3);
+            int nameW = Math.max(0, deleteX - nameX - 3);
             String name;
             if (entry) {
                 ItemStack stack = getContainer().getSamples().getStackInSlot(rows.get(r));
@@ -224,12 +240,31 @@ public class ClassifyTab extends UpgradeSettingsTab<ClassifyUpgradeContainer> {
             } else {
                 name = Component.translatable("gui.sbaddon.classify.row.empty").getString();
             }
-            graphics.drawString(font, truncate(name, nameW), nameX, y + 6,
+            graphics.drawString(font, truncate(name, nameW), nameX, y + 5,
                     entry ? COLOR_LABEL : COLOR_LABEL_DIM, false);
             drawHandle(graphics, handleX, y, h, entry);
+            if (entry) {
+                drawDelete(graphics, deleteX, y, h, inside(mouseX, mouseY, deleteX, y, DELETE_W, h));
+            }
 
-            rowHits.add(new int[]{r, entry ? 1 : 0, x, y, w, h, handleX});
+            rowHits.add(new int[]{r, entry ? 1 : 0, x, y, w, h, handleX, deleteX});
         }
+    }
+
+    /** 行尾的删除按钮：点一下直接删掉这条分类，不从槽里"取出"物品（取样槽不可拿取）。 */
+    private void drawDelete(GuiGraphics graphics, int x, int y, int h, boolean hovered) {
+        if (hovered) {
+            graphics.fill(x, y + 2, x + DELETE_W, y + h - 2, 0xFFA34A4A);
+        }
+        int color = hovered ? 0xFFFFFFFF : 0xFF3C1A1A;
+        int cx = x + 2;
+        int cy = y + h / 2 - 2;
+        graphics.fill(cx, cy, cx + 5, cy + 1, color);
+        graphics.fill(cx, cy + 4, cx + 5, cy + 5, color);
+        graphics.fill(cx + 1, cy + 1, cx + 2, cy + 2, color);
+        graphics.fill(cx + 3, cy + 1, cx + 4, cy + 2, color);
+        graphics.fill(cx + 1, cy + 3, cx + 2, cy + 4, color);
+        graphics.fill(cx + 3, cy + 3, cx + 4, cy + 4, color);
     }
 
     /** 内容超出可视行数时，右侧画一条滚动条（轨道 + 滑块）。 */
@@ -318,7 +353,14 @@ public class ClassifyTab extends UpgradeSettingsTab<ClassifyUpgradeContainer> {
             return true;
         }
         for (int[] hit : rowHits) {
-            if (hit[1] == 1 && inside(mouseX, mouseY, hit[6], hit[3], HANDLE_W, hit[5])) {
+            if (hit[1] != 1) {
+                continue;
+            }
+            if (inside(mouseX, mouseY, hit[7], hit[3], DELETE_W, hit[5])) {
+                deleteEntry(hit[0]);
+                return true;
+            }
+            if (inside(mouseX, mouseY, hit[6], hit[3], HANDLE_W, hit[5])) {
                 draggingRow = hit[0];
                 dragTargetRow = hit[0];
                 return true;
@@ -371,17 +413,50 @@ public class ClassifyTab extends UpgradeSettingsTab<ClassifyUpgradeContainer> {
         getContainer().sendDataToServer(() -> ClassifyUpgradeContainer.reorderTag(slotOrder));
     }
 
+    /** 删掉第 row 条分类：直接重排样本槽数据并同步服务端，槽里的物品本身不还给玩家。 */
+    private void deleteEntry(int row) {
+        List<Integer> order = new ArrayList<>(usedSlots());
+        if (row < 0 || row >= order.size()) {
+            return;
+        }
+        order.remove(row);
+        int[] slotOrder = order.stream().mapToInt(Integer::intValue).toArray();
+        getContainer().applyOrder(slotOrder);
+        getContainer().sendDataToServer(() -> ClassifyUpgradeContainer.reorderTag(slotOrder));
+        if (scrollRow > 0) {
+            scrollRow--;
+        }
+    }
+
     @Override
     public boolean mouseScrolled(double mouseX, double mouseY, double scrollX, double scrollY) {
-        int visible = rowsVisible();
-        int maxScroll = Math.max(0, rows().size() - visible);
-        int listBottom = listTop() + visible * ROW_H;
-        if (maxScroll > 0 && mouseX >= getX() && mouseX < getX() + getWidth()
-                && mouseY >= listTop() && mouseY < listBottom) {
-            scrollRow = Math.min(Math.max(scrollRow - (int) Math.signum(scrollY), 0), maxScroll);
+        if (scrollList(mouseX, mouseY, scrollY)) {
             return true;
         }
         return super.mouseScrolled(mouseX, mouseY, scrollX, scrollY);
+    }
+
+    /**
+     * 在列表区域滚轮时滚列表本身。
+     * <p>
+     * SB 的 {@code StorageScreenBase.mouseScrolled} 不把事件派发给页签，所以这个方法是
+     * 由 {@code StorageScreenBaseMixin} 在滚轮入口主动调用的；鼠标在列表上时一律吃掉事件，
+     * 避免背包网格跟着滚。
+     */
+    public boolean scrollList(double mouseX, double mouseY, double scrollY) {
+        if (!getContainer().isOpen()) {
+            return false;
+        }
+        int visible = rowsVisible();
+        int listBottom = listTop() + visible * ROW_H;
+        if (mouseX < getX() || mouseX >= getX() + getWidth() || mouseY < listTop() || mouseY >= listBottom) {
+            return false;
+        }
+        int maxScroll = Math.max(0, rows().size() - visible);
+        if (maxScroll > 0 && scrollY != 0) {
+            scrollRow = Math.min(Math.max(scrollRow - (int) Math.signum(scrollY), 0), maxScroll);
+        }
+        return true;
     }
 
     @Override
