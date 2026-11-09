@@ -1,0 +1,97 @@
+plugins {
+    id 'java'
+    id 'net.neoforged.moddev' version '2.0.148'
+}
+
+version = mod_version
+group = mod_group_id
+
+base {
+    archivesName = mod_id
+}
+
+java {
+    toolchain {
+        languageVersion = JavaLanguageVersion.of(21)
+    }
+}
+
+// 外部模组 jar（精妙背包、精妙核心等）统一放在 HuanJ/libs，编译期只读引用。
+def externalLibs = fileTree(dir: "${rootDir}/../libs", include: ['*.jar'])
+
+neoForge {
+    version = project.neo_version
+
+    runs {
+        // 客户端调试：运行目录 project/run
+        client {
+            client()
+        }
+        // 服务端调试：运行目录 project/run-server
+        server {
+            server()
+            programArgument '--nogui'
+        }
+        // 数据生成：输出到 src/generated/resources
+        data {
+            data()
+            programArguments.addAll '--mod', project.mod_id, '--all',
+                    '--output', file('src/generated/resources/').getAbsolutePath(),
+                    '--existing', file('src/main/resources/').getAbsolutePath()
+        }
+    }
+
+    mods {
+        "${mod_id}" {
+            sourceSet sourceSets.main
+        }
+    }
+}
+
+repositories {
+    mavenCentral()
+    maven { url = 'https://maven.neoforged.net/releases' }
+}
+
+dependencies {
+    compileOnly externalLibs
+}
+
+sourceSets.main.resources {
+    srcDir 'src/generated/resources'
+}
+
+tasks.withType(JavaCompile).configureEach {
+    options.encoding = 'UTF-8'
+    options.release = 21
+}
+
+tasks.named('processResources', ProcessResources).configure {
+    var replaceProperties = [
+            minecraft_version      : minecraft_version,
+            minecraft_version_range: '[1.21.1,1.21.2)',
+            neo_version            : neo_version,
+            neo_version_range      : '[21.1.229,)',
+            loader_version_range   : '[4,)',
+            mod_id                 : mod_id,
+            mod_name               : mod_name,
+            mod_license            : mod_license,
+            mod_version            : mod_version,
+            mod_authors            : mod_authors
+    ]
+    inputs.properties replaceProperties
+    filesMatching(['META-INF/neoforge.mods.toml', 'pack.mcmeta']) {
+        expand replaceProperties
+    }
+}
+
+// 构建完成后把 jar 复制到 HuanJ/dist，方便直接丢进正式游戏 mods 目录
+tasks.register('collectJar', Copy) {
+    dependsOn tasks.named('jar')
+    from tasks.named('jar').map { it.archiveFile }
+    into "${rootDir}/../dist"
+}
+
+tasks.named('build') {
+    finalizedBy 'collectJar'
+}

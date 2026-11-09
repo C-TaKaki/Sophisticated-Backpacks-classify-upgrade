@@ -1,0 +1,18 @@
+# 环境（不纳入版本控制）
+tools/
+gradle-home/
+
+# 构建产物
+dist/
+logs/
+project/.gradle/
+project/build/
+project/run/
+project/run-server/
+project/run-data/
+project/src/generated/resources/.cache/
+
+# IDE
+.idea/
+*.iml
+.vscode/
