@@ -12,6 +12,7 @@ import net.p3pp3rf1y.sophisticatedcore.client.gui.StorageScreenBase;
 import net.p3pp3rf1y.sophisticatedcore.common.gui.StorageContainerMenuBase;
 import net.p3pp3rf1y.sophisticatedcore.common.gui.UpgradeContainerBase;
 import org.spongepowered.asm.mixin.Mixin;
+import org.spongepowered.asm.mixin.Shadow;
 import org.spongepowered.asm.mixin.Unique;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
@@ -51,6 +52,14 @@ public abstract class StorageScreenBaseMixin {
     @Unique
     private List<ClassifyLayout.Placement> sbaddon$placements = List.of();
 
+    /** 上一帧是否真的套用过分类布局（用来判断需不需要把槽位还给 SB）。 */
+    @Unique
+    private boolean sbaddon$layoutApplied;
+
+    /** SB 自己的槽位排版：分类关掉/升级被拿掉时靠它把槽位摆回原样。 */
+    @Shadow
+    protected abstract void updateStorageSlotsPositions();
+
     @Inject(method = "render", at = @At("HEAD"))
     private void sbaddon$applyLayout(GuiGraphics graphics, int mouseX, int mouseY, float partialTick, CallbackInfo ci) {
         // 每帧先清空：升级被关掉 / 被拿掉时这里会提前 return，
@@ -65,11 +74,16 @@ public abstract class StorageScreenBaseMixin {
             return;
         }
         ClassifyUpgradeContainer container = sbaddon$findContainer(menu);
-        if (container == null) {
-            return;
-        }
-        // 升级被左侧开关关掉时按原版网格排版，不做任何分类
-        if (!container.isUpgradeEnabled()) {
+        boolean active = container != null && container.isUpgradeEnabled();
+        if (!active) {
+            // 关闭分类或升级被拿掉：把我们藏起来的槽位还给 SB，网格恢复原版排版
+            if (sbaddon$layoutApplied) {
+                sbaddon$layoutApplied = false;
+                sbaddon$originX = Integer.MIN_VALUE;
+                sbaddon$appliedSlot0X = Integer.MIN_VALUE;
+                sbaddon$scroll = 0;
+                updateStorageSlotsPositions();
+            }
             return;
         }
 
@@ -120,6 +134,7 @@ public abstract class StorageScreenBaseMixin {
         sbaddon$appliedSlot0Y = slot0.y;
         sbaddon$banners = result.banners();
         sbaddon$placements = result.placements();
+        sbaddon$layoutApplied = true;
     }
 
     /**
