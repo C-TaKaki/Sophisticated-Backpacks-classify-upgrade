@@ -81,23 +81,35 @@ public class ClassifyTab extends UpgradeSettingsTab<ClassifyUpgradeContainer> {
 
         boolean empty = getContainer().getModWhitelist().isEmpty();
         int hintY = gy + rows * CELL + 3;
-        graphics.drawString(font,
-                Component.translatable(empty ? "gui.sbaddon.classify.hint.empty" : "gui.sbaddon.classify.hint"),
-                getX() + PAD, hintY, COLOR_LABEL_DIM, false);
+        int textLeft = getX() + PAD;
+        int maxTextWidth = getWidth() - PAD * 2;
+        Component hint = Component.translatable(empty ? "gui.sbaddon.classify.hint.empty" : "gui.sbaddon.classify.hint");
+        graphics.drawString(font, truncate(hint.getString(), maxTextWidth), textLeft, hintY, COLOR_LABEL_DIM, false);
 
         // 兜底组排序切换
         SortBy sortBy = getContainer().getFallbackSort();
         Component sortLabel = Component.translatable("gui.sbaddon.classify.sort",
                 Component.translatable("gui.sbaddon.classify.sort." + sortBy.getSerializedName()));
-        int w = Math.min(getWidth() - PAD * 2, font.width(sortLabel) + 6);
-        int x = getX() + PAD;
+        int w = Math.min(maxTextWidth, font.width(sortLabel) + 6);
+        int x = textLeft;
         int y = hintY + 11;
         sortButtonX = x;
         sortButtonY = y;
         sortButtonW = w;
         boolean hovered = mouseX >= x && mouseX < x + w && mouseY >= y && mouseY < y + BAR_H - 1;
         graphics.fill(x, y, x + w, y + BAR_H - 1, hovered ? 0xFF6E8A5A : COLOR_BAR_BTN);
-        graphics.drawString(font, sortLabel, x + 3, y + 1, 0xFFFFFFFF, false);
+        graphics.drawString(font, truncate(sortLabel.getString(), w - 5), x + 3, y + 1, 0xFFFFFFFF, false);
+    }
+
+    /** 宽度不够时截断加省略号，避免文字冲出面板。 */
+    private String truncate(String text, int maxWidth) {
+        if (maxWidth <= 0) {
+            return "";
+        }
+        if (font.width(text) <= maxWidth) {
+            return text;
+        }
+        return font.plainSubstrByWidth(text, Math.max(0, maxWidth - font.width("..."))) + "...";
     }
 
     @Override

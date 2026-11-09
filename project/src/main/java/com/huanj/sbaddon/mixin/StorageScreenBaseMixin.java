@@ -47,6 +47,8 @@ public abstract class StorageScreenBaseMixin {
 
     @Unique
     private List<ClassifyLayout.Banner> sbaddon$banners = List.of();
+    @Unique
+    private List<ClassifyLayout.Placement> sbaddon$placements = List.of();
 
     @Inject(method = "render", at = @At("HEAD"))
     private void sbaddon$applyLayout(GuiGraphics graphics, int mouseX, int mouseY, float partialTick, CallbackInfo ci) {
@@ -68,7 +70,10 @@ public abstract class StorageScreenBaseMixin {
         if (cols <= 0 || storageSlots <= 0) {
             return;
         }
-        int rows = Math.max(1, (storageSlots + cols - 1) / cols);
+        // 面板实际能显示的行数：imageHeight = 114 + 18 * 可见行数。
+        // 不能用 storageSlots/cols —— 那会让超出面板的槽位铺到玩家物品栏上，把玩家槽盖住。
+        int visibleRows = Math.max(1, (self.getYSize() - StorageScreenBase.HEIGHT_WITHOUT_STORAGE_SLOTS) / 18);
+        int rows = visibleRows;
 
         Slot slot0 = menu.getSlot(0);
         if (slot0.x != sbaddon$appliedSlot0X || slot0.y != sbaddon$appliedSlot0Y) {
@@ -106,6 +111,36 @@ public abstract class StorageScreenBaseMixin {
         sbaddon$appliedSlot0X = slot0.x;
         sbaddon$appliedSlot0Y = slot0.y;
         sbaddon$banners = result.banners();
+        sbaddon$placements = result.placements();
+    }
+
+    /**
+     * SB 的格子背景是按「所有可见槽位」铺的一张连续网格，而分类布局在中间插入了整行横幅，
+     * 两者必然错位 —— 物品看起来压出格子、数量数字骑在边框上，就是这个原因。
+     * 这里干掉它的背景，改成按我们自己的布局逐格绘制。
+     */
+    @Inject(method = "drawSlotBg", at = @At("HEAD"), cancellable = true)
+    private void sbaddon$drawSlotBg(GuiGraphics graphics, int left, int top, int slotsCount, CallbackInfo ci) {
+        if (!sbaddon$placements.isEmpty()) {
+            ci.cancel();
+        }
+    }
+
+    /** 大背包带滚动面板时 SB 不调 drawSlotBg，所以统一在 renderBg 末尾自己铺格子。 */
+    @Inject(method = "renderBg", at = @At("TAIL"))
+    private void sbaddon$drawAlignedSlotBg(GuiGraphics graphics, float partialTick, int mouseX, int mouseY,
+                                           CallbackInfo ci) {
+        if (sbaddon$placements.isEmpty()) {
+            return;
+        }
+        StorageScreenBase<?> self = (StorageScreenBase<?>) (Object) this;
+        int left = self.getGuiLeft();
+        int top = self.getGuiTop();
+        for (ClassifyLayout.Placement placement : sbaddon$placements) {
+            // 槽位坐标天然比格子边框内缩 1px，这里补回去
+            net.p3pp3rf1y.sophisticatedcore.client.gui.utils.GuiHelper.renderSlotsBackground(
+                    graphics, left + placement.x() - 1, top + placement.y() - 1, 1, 1);
+        }
     }
 
     @Inject(method = "mouseScrolled", at = @At("HEAD"), cancellable = true)
@@ -141,7 +176,14 @@ public abstract class StorageScreenBaseMixin {
             if (!banner.icon().isEmpty()) {
                 graphics.renderItem(banner.icon(), x + 1, y + 1);
             }
-            graphics.drawString(font, banner.label(), x + 20, y + 5, 0xFFE6E6E6, false);
+            // 模组名过长时按剩余宽度截断加省略号，不让文字冲出横幅
+            String label = banner.label().getString();
+            int textLeft = x + 20;
+            int textWidth = Math.max(0, right - textLeft - 2);
+            if (font.width(label) > textWidth) {
+                label = font.plainSubstrByWidth(label, Math.max(0, textWidth - font.width("..."))) + "...";
+            }
+            graphics.drawString(font, label, textLeft, y + 5, 0xFFE6E6E6, false);
         }
     }
 
