@@ -1,0 +1,16 @@
+{
+  "item.sbaddon.classify_upgrade": "Classification Upgrade",
+  "gui.sbaddon.classify.title": "Classification",
+  "gui.sbaddon.classify.tooltip": "Groups backpack contents by mod",
+  "gui.sbaddon.classify.view.list": "List",
+  "gui.sbaddon.classify.view.config": "Setup",
+  "gui.sbaddon.classify.empty": "Nothing to show",
+  "gui.sbaddon.classify.fallback": "Unclassified",
+  "gui.sbaddon.classify.vanilla": "Vanilla",
+  "gui.sbaddon.classify.hint": "Drop items here to add their mod",
+  "gui.sbaddon.classify.hint.empty": "Drop an item to add its mod",
+  "gui.sbaddon.classify.sort": "Sort: %s",
+  "gui.sbaddon.classify.sort.name": "Name",
+  "gui.sbaddon.classify.sort.count": "Count",
+  "gui.sbaddon.classify.sort.tags": "Tags"
+}

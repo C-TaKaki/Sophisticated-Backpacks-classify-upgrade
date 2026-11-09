@@ -1,0 +1,16 @@
+{
+  "item.sbaddon.classify_upgrade": "分类扩展升级",
+  "gui.sbaddon.classify.title": "分类扩展",
+  "gui.sbaddon.classify.tooltip": "按模组对背包内容分组显示",
+  "gui.sbaddon.classify.view.list": "列表",
+  "gui.sbaddon.classify.view.config": "配置",
+  "gui.sbaddon.classify.empty": "没有可显示的物品",
+  "gui.sbaddon.classify.fallback": "默认分类",
+  "gui.sbaddon.classify.vanilla": "原版",
+  "gui.sbaddon.classify.hint": "把物品拖进格子即可添加其模组",
+  "gui.sbaddon.classify.hint.empty": "拖入物品以添加模组",
+  "gui.sbaddon.classify.sort": "排序：%s",
+  "gui.sbaddon.classify.sort.name": "名称",
+  "gui.sbaddon.classify.sort.count": "数量",
+  "gui.sbaddon.classify.sort.tags": "标签"
+}
