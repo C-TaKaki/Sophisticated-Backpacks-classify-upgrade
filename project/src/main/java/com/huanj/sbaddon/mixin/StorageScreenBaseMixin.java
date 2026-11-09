@@ -1,5 +1,6 @@
 package com.huanj.sbaddon.mixin;
 
+import com.huanj.sbaddon.client.BannerBackground;
 import com.huanj.sbaddon.client.ClassifyTab;
 import com.huanj.sbaddon.client.layout.ClassifyLayout;
 import com.huanj.sbaddon.upgrade.ClassifyUpgradeContainer;
@@ -213,11 +214,8 @@ public abstract class StorageScreenBaseMixin {
             int x = left + banner.x() - 1;
             int y = top + banner.y() - 1;
             int right = x + banner.width();
-            int bottom = y + ClassifyLayout.CELL;
-            // 不透明整行填充：把背景贴图里的格子边框线彻底盖掉，标签行不留任何框线
-            graphics.fill(x, y, right, bottom, 0xFF2F353C);
-            graphics.fill(x, y, right, y + 1, 0xFF454E57);
-            graphics.fill(x, bottom - 1, right, bottom, 0xFF23282D);
+            // 纯代码绘制的像素横幅底（原图 25×25，中间横向拉伸，四角 1:1）
+            BannerBackground.render(graphics, x, y, banner.width(), ClassifyLayout.CELL);
             if (!banner.icon().isEmpty()) {
                 graphics.renderItem(banner.icon(), x + 1, y + 1);
             }
@@ -228,7 +226,7 @@ public abstract class StorageScreenBaseMixin {
             if (font.width(label) > textWidth) {
                 label = font.plainSubstrByWidth(label, Math.max(0, textWidth - font.width("..."))) + "...";
             }
-            graphics.drawString(font, label, textLeft, y + 5, 0xFFE6E6E6, false);
+            graphics.drawString(font, label, textLeft, y + 5, 0xFF1D2433, false);
         }
     }
 
