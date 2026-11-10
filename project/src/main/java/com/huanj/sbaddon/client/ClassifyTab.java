@@ -505,10 +505,17 @@ public class ClassifyTab extends UpgradeSettingsTab<ClassifyUpgradeContainer> {
         if (draggingRow >= 0) {
             int from = draggingRow;
             int to = dragTargetRow;
+            // 松手瞬间被拖行的视觉位置。重排后缓存必须清空：缓存的 key 是「行索引」，
+            // 而重排把各索引对应的条目换了，留着旧缓存会让每一行都从旧位置再滑一次
+            // （表现就是松手后动画重播）。清空后只有被拖那一行从当前位置收尾，其余行
+            // 直接落在让位后的位置上 —— 它们在拖动过程中已经停在那里了。
+            float releasedY = displayY(from);
             draggingRow = -1;
             dragTargetRow = -1;
+            rowDisplayY.clear();
             if (button == 0 && to >= 0 && from != to) {
                 applyReorder(from, to);
+                rowDisplayY.put(to, releasedY);
             }
             return true;
         }
@@ -540,6 +547,8 @@ public class ClassifyTab extends UpgradeSettingsTab<ClassifyUpgradeContainer> {
         int[] slotOrder = order.stream().mapToInt(Integer::intValue).toArray();
         getContainer().applyOrder(slotOrder);
         getContainer().sendDataToServer(() -> ClassifyUpgradeContainer.reorderTag(slotOrder));
+        // 行顺序变了，缓存的 y 与索引不再对应，直接丢掉，避免删完又播一次滑动
+        rowDisplayY.clear();
         if (scrollRow > 0) {
             scrollRow--;
         }
