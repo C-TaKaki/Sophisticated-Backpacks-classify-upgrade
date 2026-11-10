@@ -36,8 +36,8 @@ public final class ClassifyLayout {
     /** 分类横幅与下方物品格子之间的空隙（已按需求取消）。 */
     public static final int BANNER_GAP = 0;
 
-    /** 横幅贴图四边向内缩进的像素数。 */
-    public static final int BANNER_INSET = 1;
+    /** 横幅贴图四边向内缩进的像素数（0 = 不缩，铺满整行）。 */
+    public static final int BANNER_INSET = 0;
 
     private ClassifyLayout() {
     }
