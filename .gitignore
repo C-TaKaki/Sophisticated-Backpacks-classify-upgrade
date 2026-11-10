@@ -16,3 +16,6 @@ project/src/generated/resources/.cache/
 .idea/
 *.iml
 .vscode/
+
+# 启动脚本临时状态（-QuickPlay 写入）
+project/quickplay.txt

@@ -1,8 +1,21 @@
 # Sync external mods, then launch the NeoForge dev client (game dir: project\run).
 # 关闭游戏窗口后会把本局启动的 JVM / Gradle 守护进程一并清理干净，脚本返回时不留后台进程。
+# 用法：run-client.ps1 -QuickPlay "新的世界"  → 跳过主菜单直接进该存档；不带参数则正常启动
+param([string]$QuickPlay)
+
 $ErrorActionPreference = 'Stop'
 $root = $PSScriptRoot
 & (Join-Path $root 'sync-mods.ps1')
+
+# build.gradle 会读这个文件拼 --quickPlaySingleplayer（走文件是为了避开 gradlew.bat 拆参数）
+$quickPlayFile = Join-Path $root 'project\quickplay.txt'
+if ($QuickPlay) {
+    # 无 BOM 的 UTF-8，否则 Groovy 读出来会多一个 \uFEFF 前导字符
+    [System.IO.File]::WriteAllText($quickPlayFile, $QuickPlay, [System.Text.UTF8Encoding]::new($false))
+    Write-Host "[run-client] quickPlay -> $QuickPlay"
+} elseif (Test-Path -LiteralPath $quickPlayFile) {
+    Remove-Item -LiteralPath $quickPlayFile -Force
+}
 
 $env:JAVA_HOME = Join-Path $root 'tools\jdk21'
 $env:GRADLE_USER_HOME = Join-Path $root 'gradle-home'

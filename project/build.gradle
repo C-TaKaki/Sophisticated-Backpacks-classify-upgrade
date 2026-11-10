@@ -29,6 +29,16 @@ neoForge {
         // 客户端调试：运行目录 project/run
         client {
             client()
+            // 直接进存档：run-client.ps1 -QuickPlay "<存档目录名>" 会往 project/quickplay.txt 写一行，
+            // 这里读出来拼成 --quickPlaySingleplayer。走文件而不是命令行参数，
+            // 是因为经过 gradlew.bat 传带空格的参数会被 cmd 拆成两个。
+            def quickPlayFile = file('quickplay.txt')
+            if (quickPlayFile.exists()) {
+                def level = quickPlayFile.getText('UTF-8').trim()
+                if (!level.isEmpty()) {
+                    programArguments.addAll('--quickPlaySingleplayer', level)
+                }
+            }
         }
         // 服务端调试：运行目录 project/run-server
         server {
