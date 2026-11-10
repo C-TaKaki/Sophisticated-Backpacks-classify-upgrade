@@ -8,7 +8,6 @@ import com.huanj.sbaddon.upgrade.ClassifyUpgradeContainer;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.Font;
 import net.minecraft.client.gui.GuiGraphics;
-import net.minecraft.network.chat.Component;
 import net.minecraft.world.inventory.AbstractContainerMenu;
 import net.minecraft.world.inventory.Slot;
 import net.minecraft.world.item.ItemStack;
@@ -226,20 +225,25 @@ public abstract class StorageScreenBaseMixin {
             int x = left + banner.x() - 1;
             int y = top + banner.y() - 1;
             int right = x + banner.width();
-            // 纯代码绘制的像素横幅底（原图 25×25，中间横向拉伸，四角 1:1）
-            BannerBackground.render(graphics, x, y, banner.width(), ClassifyLayout.CELL);
+            int inset = ClassifyLayout.BANNER_INSET;
+            // 纯代码绘制的像素横幅底（原图 25×25，中间横向平铺），四边各向内缩 3px
+            int boxW = banner.width() - inset * 2;
+            int boxH = ClassifyLayout.CELL - inset * 2;
+            BannerBackground.render(graphics, x + inset, y + inset, boxW, boxH);
             if (!banner.icon().isEmpty()) {
-                // 图标缩小 10% 且右移 4px：pose 缩放到 0.9，再整体往右挪
+                // 图标缩小 10% 后仍要在 18×18 的格子里水平和垂直居中：
+                // 16×0.9 = 14.4，两侧各留 (18-14.4)/2 = 1.8
+                float iconSize = 16.0f * 0.9f;
+                float offset = (ClassifyLayout.CELL - iconSize) / 2.0f;
                 graphics.pose().pushPose();
-                graphics.pose().translate(x + 5.0f, y + 1.0f, 0.0f);
+                graphics.pose().translate(x + offset, y + offset, 0.0f);
                 graphics.pose().scale(0.9f, 0.9f, 1.0f);
                 graphics.renderItem(banner.icon(), 0, 0);
                 graphics.pose().popPose();
             }
             // 模组名过长时按剩余宽度截断加省略号，不让文字冲出横幅
-            // 起点跟着图标右移 + 缩小让出的宽度走，避免文字贴到图标上
             String label = banner.label().getString();
-            int textLeft = x + 23;
+            int textLeft = x + 20;
             int textWidth = Math.max(0, right - textLeft - 2);
             if (font.width(label) > textWidth) {
                 label = font.plainSubstrByWidth(label, Math.max(0, textWidth - font.width("..."))) + "...";
@@ -262,9 +266,8 @@ public abstract class StorageScreenBaseMixin {
             return;
         }
         ItemStack stack = hovered.getItem();
-        Component modName = ModNames.displayName(ModNames.namespaceOf(stack));
         graphics.renderTooltip(Minecraft.getInstance().font,
-                List.of(modName, stack.getHoverName()), Optional.empty(), mouseX, mouseY);
+                List.of(ModNames.displayName(ModNames.namespaceOf(stack))), Optional.empty(), mouseX, mouseY);
         ci.cancel();
     }
 

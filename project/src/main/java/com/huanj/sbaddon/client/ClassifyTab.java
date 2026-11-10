@@ -360,8 +360,9 @@ public class ClassifyTab extends UpgradeSettingsTab<ClassifyUpgradeContainer> {
         if (!entry) {
             drawAutoButton(graphics, mouseX, mouseY, x, y, w, h);
         }
-        drawHandle(graphics, handleX, y, h, entry);
         if (entry) {
+            // 拖拽手柄只属于已配置条目；底部「拖入物品添加」行不放手柄
+            drawHandle(graphics, handleX, y, h, true);
             drawDelete(graphics, deleteX, y, h, inside(mouseX, mouseY, deleteX, y, DELETE_W, h));
         }
 
