@@ -7,7 +7,5 @@
   "gui.sbaddon.classify.empty": "没有可显示的物品",
   "gui.sbaddon.classify.fallback": "默认分类",
   "gui.sbaddon.classify.vanilla": "原版",
-  "gui.sbaddon.classify.hint": "拖入添加；拖手柄调序；× 删除",
-  "gui.sbaddon.classify.hint.empty": "拖入物品以添加模组",
   "gui.sbaddon.classify.row.empty": "拖入物品添加"
 }

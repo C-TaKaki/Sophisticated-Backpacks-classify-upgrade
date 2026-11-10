@@ -36,8 +36,6 @@ public class ClassifyTab extends UpgradeSettingsTab<ClassifyUpgradeContainer> {
     private static final int HANDLE_W = 9;
     private static final int DELETE_W = 9;
     private static final int CELL = 18;
-    /** 底部只留一行提示文字。 */
-    private static final int FOOTER_H = 18;
     private static final int SCROLLBAR_W = 3;
 
     private static final int COLOR_ROW_BG = 0xFF8E8E8E;
@@ -60,6 +58,11 @@ public class ClassifyTab extends UpgradeSettingsTab<ClassifyUpgradeContainer> {
     private int scrollRow;
     private int draggingRow = -1;
     private int dragTargetRow = -1;
+    /** 拖动中鼠标的 y，被拖的那一行直接跟手。 */
+    private double dragMouseY;
+
+    /** 行索引 → 当前渲染 y（绝对坐标）。拖动让位时朝目标值插值，形成平滑移动。 */
+    private final java.util.Map<Integer, Float> rowDisplayY = new java.util.HashMap<>();
 
     public ClassifyTab(ClassifyUpgradeContainer container, Position position, StorageScreenBase<?> screen) {
         super(container, position, screen,
@@ -110,9 +113,14 @@ public class ClassifyTab extends UpgradeSettingsTab<ClassifyUpgradeContainer> {
         return getY() + TITLE_H + 4;
     }
 
+    /** 底部「拖入物品添加」那一行的 y：固定贴底，不随滚动。 */
+    private int pinnedRowY() {
+        return getY() + TAB_HEIGHT - ROW_H - PAD;
+    }
+
+    /** 列表区可显示的行数 —— 底部的添加行固定占一行，不参与滚动。 */
     private int rowsVisible() {
-        int available = TAB_HEIGHT - (listTop() - getY()) - FOOTER_H;
-        return Math.max(1, available / ROW_H);
+        return Math.max(1, (pinnedRowY() - listTop()) / ROW_H);
     }
 
     /** 已配置的样本槽索引（按槽位顺序），也就是条目的显示顺序。 */
@@ -137,20 +145,9 @@ public class ClassifyTab extends UpgradeSettingsTab<ClassifyUpgradeContainer> {
         return -1;
     }
 
-    /** 行 -> 样本槽索引；末尾多一行空行（用于拖入新增）。 */
-    private List<Integer> rows() {
-        List<Integer> used = usedSlots();
-        List<Integer> rows = new ArrayList<>(used);
-        int empty = firstEmptySlot();
-        if (empty >= 0) {
-            rows.add(empty);
-        }
-        return rows;
-    }
-
     @Override
     protected void moveSlotsToTab() {
-        layoutSlots();
+        layoutSlots(usedSlots());
     }
 
     /**
@@ -166,25 +163,30 @@ public class ClassifyTab extends UpgradeSettingsTab<ClassifyUpgradeContainer> {
     }
 
     /** 把每个样本槽摆到它所在行的图标位置上；不在可见范围内的丢到屏幕外。 */
-    private void layoutSlots() {
+    private void layoutSlots(List<Integer> entries) {
         List<Slot> slots = getContainer().getSlots();
         int guiLeft = screen.getGuiLeft();
         int guiTop = screen.getGuiTop();
-        List<Integer> rows = rows();
         int visible = rowsVisible();
 
         for (Slot slot : slots) {
             slot.x = -10000;
             slot.y = -10000;
         }
-        for (int r = scrollRow; r < rows.size() && r < scrollRow + visible; r++) {
-            int slotIndex = rows.get(r);
+        for (int r = scrollRow; r < entries.size() && r < scrollRow + visible; r++) {
+            int slotIndex = entries.get(r);
             if (slotIndex < 0 || slotIndex >= slots.size()) {
                 continue;
             }
-            int vis = r - scrollRow;
             slots.get(slotIndex).x = rowIconX() - guiLeft;
-            slots.get(slotIndex).y = rowIconY(vis) - guiTop;
+            // 用动画后的 y：拖动让位时图标跟着行一起平滑移动
+            slots.get(slotIndex).y = Math.round(displayY(r)) + 1 - guiTop;
+        }
+        // 底部固定的「拖入物品添加」行
+        int emptySlot = firstEmptySlot();
+        if (emptySlot >= 0 && emptySlot < slots.size()) {
+            slots.get(emptySlot).x = rowIconX() - guiLeft;
+            slots.get(emptySlot).y = pinnedRowY() + 1 - guiTop;
         }
     }
 
@@ -206,9 +208,59 @@ public class ClassifyTab extends UpgradeSettingsTab<ClassifyUpgradeContainer> {
         return rowX() + 1;
     }
 
-    private int rowIconY(int visRow) {
-        // 行高 18、图标 16，上下各留 1px
-        return rowY(visRow) + 1;
+    // ---------------------------------------------------------------- 让位动画
+
+    /** 该行的目标 y：拖动中的行跟手，其余行按「谁让位」错开一格。 */
+    private float targetY(int r) {
+        if (draggingRow == r) {
+            double follow = dragMouseY - ROW_H / 2.0;
+            double clamped = Math.max(listTop() - ROW_H / 2.0, Math.min(follow, pinnedRowY()));
+            return (float) clamped;
+        }
+        int shifted = r;
+        if (draggingRow >= 0 && dragTargetRow >= 0) {
+            if (draggingRow < r && r <= dragTargetRow) {
+                // 后面的行整体上移一格，把位置让出来
+                shifted = r - 1;
+            } else if (dragTargetRow <= r && r < draggingRow) {
+                // 前面的行整体下移一格
+                shifted = r + 1;
+            }
+        }
+        return rowY(shifted - scrollRow);
+    }
+
+    /** 每帧刷新一次所有可见行的显示位置。 */
+    private void updateRowPositions(List<Integer> entries) {
+        int visible = rowsVisible();
+        rowDisplayY.keySet().removeIf(r -> r >= entries.size());
+        for (int r = scrollRow; r < entries.size() && r < scrollRow + visible; r++) {
+            stepTo(r);
+        }
+        if (draggingRow >= 0) {
+            stepTo(draggingRow);
+        }
+    }
+
+    /**
+     * 朝目标位置插值。拖动中的行不做插值（否则跟不上鼠标），其余行按 0.45 的系数收敛，
+     * 60fps 下大约 4 帧到位，观感是"滑过去"而不是"跳过去"。
+     */
+    private void stepTo(int r) {
+        float target = targetY(r);
+        Float current = rowDisplayY.get(r);
+        if (current == null || draggingRow == r) {
+            rowDisplayY.put(r, target);
+            return;
+        }
+        float diff = target - current;
+        rowDisplayY.put(r, Math.abs(diff) < 0.4f ? target : current + diff * 0.45f);
+    }
+
+    /** 行的当前显示 y；没算过就退回静态位置。 */
+    private float displayY(int r) {
+        Float y = rowDisplayY.get(r);
+        return y != null ? y : rowY(r - scrollRow);
     }
 
     // ---------------------------------------------------------------- 渲染
@@ -224,85 +276,104 @@ public class ClassifyTab extends UpgradeSettingsTab<ClassifyUpgradeContainer> {
             return;
         }
 
-        List<Integer> rows = rows();
+        List<Integer> entries = usedSlots();
         int visible = rowsVisible();
-        int maxScroll = Math.max(0, rows.size() - visible);
-        scrollRow = Math.min(Math.max(scrollRow, 0), maxScroll);
+        scrollRow = Math.min(Math.max(scrollRow, 0), Math.max(0, entries.size() - visible));
 
         activeTab = this;
-        layoutSlots();
+        updateRowPositions(entries);
+        layoutSlots(entries);
         rowHits.clear();
 
-        drawList(graphics, mouseX, mouseY, rows);
-        drawScrollbar(graphics, rows.size(), visible);
-        drawFooter(graphics);
+        drawList(graphics, mouseX, mouseY, entries);
+        drawPinnedRow(graphics, mouseX, mouseY);
+        drawScrollbar(graphics, entries.size(), visible);
     }
 
-    private void drawList(GuiGraphics graphics, int mouseX, int mouseY, List<Integer> rows) {
+    /** 条目行。拖动中的那一行最后画，压在其他行上面。 */
+    private void drawList(GuiGraphics graphics, int mouseX, int mouseY, List<Integer> entries) {
         int visible = rowsVisible();
-        int x = rowX();
-        int w = rowWidth();
-        int h = ROW_FILL_H;
-        int usedCount = usedSlots().size();
-
-        for (int r = scrollRow; r < rows.size() && r < scrollRow + visible; r++) {
-            int vis = r - scrollRow;
-            int y = rowY(vis);
-            boolean entry = r < usedCount;
-            boolean hovered = inside(mouseX, mouseY, x, y, w, h);
-            boolean dragging = entry && draggingRow == r;
-
-            int bg = dragging ? 0xFF9CB088 : hovered ? 0xFF9E9E9E : COLOR_ROW_BG;
-            graphics.fill(x, y, x + w, y + h, bg);
-            graphics.fill(x, y, x + w, y + 1, COLOR_ROW_HL);
-            graphics.fill(x, y + h - 1, x + w, y + h, COLOR_ROW_SH);
-
-            // 图标格：直接用精妙背包自己的槽位背景贴图（18×18，和原版设置页 / 背包网格里的槽位同款）。
-            // 背景左上角比槽位坐标外扩 1px，物品正好落在凹槽内居中 —— 原来手绘的深灰方块
-            // 起点和宽度都没按这套几何算，所以和图标对不上。
-            int iconX = rowIconX();
-            int iconY = rowIconY(vis);
-            GuiHelper.renderSlotsBackground(graphics, iconX - 1, iconY - 1, 1, 1);
-
-            int handleX = x + w - HANDLE_W - 3;
-            int deleteX = handleX - DELETE_W - 1;
-            int nameX = iconX + CELL + 2;
-            int nameW = Math.max(0, deleteX - nameX - 3);
-            String name;
-            if (entry) {
-                ItemStack sample = getContainer().getSamples().getStackInSlot(rows.get(r));
-                String namespace = ModNames.namespaceOf(sample);
-                ItemStack icon = ModNames.icon(namespace);
-                graphics.renderItem(icon.isEmpty() ? sample : icon, iconX, iconY);
-                name = ModNames.displayName(namespace).getString();
-            } else {
-                name = Component.translatable("gui.sbaddon.classify.row.empty").getString();
+        int last = Math.min(entries.size(), scrollRow + visible);
+        for (int r = scrollRow; r < last; r++) {
+            if (r == draggingRow) {
+                continue;
             }
-            graphics.drawString(font, truncate(name, nameW), nameX, y + 5,
-                    entry ? COLOR_LABEL : COLOR_LABEL_DIM, false);
-            drawHandle(graphics, handleX, y, h, entry);
-            if (entry) {
-                drawDelete(graphics, deleteX, y, h, inside(mouseX, mouseY, deleteX, y, DELETE_W, h));
-            }
-
-            rowHits.add(new int[]{r, entry ? 1 : 0, x, y, w, h, handleX, deleteX});
+            drawRow(graphics, mouseX, mouseY, r, entries.get(r), true, Math.round(displayY(r)));
+        }
+        if (draggingRow >= scrollRow && draggingRow < last) {
+            drawRow(graphics, mouseX, mouseY, draggingRow, entries.get(draggingRow), true,
+                    Math.round(displayY(draggingRow)));
         }
     }
 
-    /** 行尾的删除按钮：点一下直接删掉这条分类，不从槽里"取出"物品（取样槽不可拿取）。 */
+    /** 底部固定行：拖入物品即新增一条分类。 */
+    private void drawPinnedRow(GuiGraphics graphics, int mouseX, int mouseY) {
+        int emptySlot = firstEmptySlot();
+        if (emptySlot < 0) {
+            return;
+        }
+        drawRow(graphics, mouseX, mouseY, -1, emptySlot, false, pinnedRowY());
+    }
+
+    private void drawRow(GuiGraphics graphics, int mouseX, int mouseY, int r, int slotIndex,
+                         boolean entry, int y) {
+        int x = rowX();
+        int w = rowWidth();
+        int h = ROW_FILL_H;
+        boolean dragging = entry && draggingRow == r;
+        boolean hovered = !dragging && inside(mouseX, mouseY, x, y, w, h);
+
+        int bg = dragging ? 0xFF9CB088 : hovered ? 0xFF9E9E9E : COLOR_ROW_BG;
+        graphics.fill(x, y, x + w, y + h, bg);
+        graphics.fill(x, y, x + w, y + 1, COLOR_ROW_HL);
+        graphics.fill(x, y + h - 1, x + w, y + h, COLOR_ROW_SH);
+
+        // 图标格：直接用精妙背包自己的槽位背景贴图（18×18，和原版设置页 / 背包网格里的槽位同款）。
+        // 背景左上角比槽位坐标外扩 1px，物品正好落在凹槽内居中。
+        int iconX = rowIconX();
+        int iconY = y + 1;
+        GuiHelper.renderSlotsBackground(graphics, iconX - 1, iconY - 1, 1, 1);
+
+        int handleX = x + w - HANDLE_W - 3;
+        int deleteX = handleX - DELETE_W - 1;
+        int nameX = iconX + CELL + 2;
+        int nameW = Math.max(0, deleteX - nameX - 3);
+        String name;
+        if (entry) {
+            ItemStack sample = getContainer().getSamples().getStackInSlot(slotIndex);
+            String namespace = ModNames.namespaceOf(sample);
+            ItemStack icon = ModNames.icon(namespace);
+            graphics.renderItem(icon.isEmpty() ? sample : icon, iconX, iconY);
+            name = ModNames.displayName(namespace).getString();
+        } else {
+            name = Component.translatable("gui.sbaddon.classify.row.empty").getString();
+        }
+        graphics.drawString(font, truncate(name, nameW), nameX, y + 5,
+                entry ? COLOR_LABEL : COLOR_LABEL_DIM, false);
+        drawHandle(graphics, handleX, y, h, entry);
+        if (entry) {
+            drawDelete(graphics, deleteX, y, h, inside(mouseX, mouseY, deleteX, y, DELETE_W, h));
+        }
+
+        if (entry) {
+            rowHits.add(new int[]{r, 1, x, y, w, h, handleX, deleteX});
+        }
+    }
+
+    /** 行尾的删除按钮：标准「×」，点一下直接删掉这条分类（样本槽不可拿取）。 */
     private void drawDelete(GuiGraphics graphics, int x, int y, int h, boolean hovered) {
         if (hovered) {
             graphics.fill(x, y + 2, x + DELETE_W, y + h - 2, 0xFFA34A4A);
         }
         int color = hovered ? 0xFFFFFFFF : 0xFF3C1A1A;
-        int cx = x + 2;
-        int cy = y + h / 2 - 2;
-        graphics.fill(cx, cy, cx + 5, cy + 1, color);
-        graphics.fill(cx, cy + 4, cx + 5, cy + 5, color);
-        graphics.fill(cx + 1, cy + 1, cx + 2, cy + 2, color);
-        graphics.fill(cx + 3, cy + 1, cx + 4, cy + 2, color);
-        graphics.fill(cx + 1, cy + 3, cx + 2, cy + 4, color);
-        graphics.fill(cx + 3, cy + 3, cx + 4, cy + 4, color);
+        // 7×7 的两条 45° 对角线，1px 粗
+        int size = 7;
+        int cx = x + (DELETE_W - size) / 2;
+        int cy = y + (h - size) / 2;
+        for (int i = 0; i < size; i++) {
+            graphics.fill(cx + i, cy + i, cx + i + 1, cy + i + 1, color);
+            graphics.fill(cx + size - 1 - i, cy + i, cx + size - i, cy + i + 1, color);
+        }
     }
 
     /** 内容超出可视行数时，右侧画一条滚动条（轨道 + 滑块）。 */
@@ -321,26 +392,18 @@ public class ClassifyTab extends UpgradeSettingsTab<ClassifyUpgradeContainer> {
         graphics.fill(x, thumbY, x + SCROLLBAR_W, thumbY + thumbH, 0xFFD8D8D8);
     }
 
+    /** 三条横线做排序手柄，线间距 3px，整体在行内垂直居中。 */
     private void drawHandle(GuiGraphics graphics, int x, int y, int h, boolean active) {
         int color = active ? COLOR_HANDLE : 0xFF7A7A7A;
+        int lines = 3;
+        int spacing = 3;
+        int totalH = (lines - 1) * spacing + 1;
         int cx = x + 2;
-        int cy = y + 4;
-        for (int i = 0; i < 3; i++) {
-            int lineY = cy + i * 4;
-            if (lineY + 1 > y + h - 2) {
-                break;
-            }
+        int cy = y + (h - totalH) / 2;
+        for (int i = 0; i < lines; i++) {
+            int lineY = cy + i * spacing;
             graphics.fill(cx, lineY, cx + 5, lineY + 1, color);
         }
-    }
-
-    private void drawFooter(GuiGraphics graphics) {
-        int textLeft = getX() + PAD + 1;
-        int maxTextWidth = getWidth() - PAD * 2 - 2;
-        int hintY = getY() + TAB_HEIGHT - FOOTER_H + 2;
-
-        Component hint = Component.translatable("gui.sbaddon.classify.hint");
-        graphics.drawString(font, truncate(hint.getString(), maxTextWidth), textLeft, hintY, COLOR_LABEL_DIM, false);
     }
 
     private String truncate(String text, int maxWidth) {
@@ -378,6 +441,7 @@ public class ClassifyTab extends UpgradeSettingsTab<ClassifyUpgradeContainer> {
             if (inside(mouseX, mouseY, hit[6], hit[3], HANDLE_W, hit[5])) {
                 draggingRow = hit[0];
                 dragTargetRow = hit[0];
+                dragMouseY = mouseY;
                 return true;
             }
         }
@@ -387,6 +451,7 @@ public class ClassifyTab extends UpgradeSettingsTab<ClassifyUpgradeContainer> {
     @Override
     public boolean mouseDragged(double mouseX, double mouseY, int button, double dragX, double dragY) {
         if (draggingRow >= 0) {
+            dragMouseY = mouseY;
             int usedCount = usedSlots().size();
             if (usedCount <= 0) {
                 return true;
@@ -467,7 +532,7 @@ public class ClassifyTab extends UpgradeSettingsTab<ClassifyUpgradeContainer> {
         if (mouseX < getX() || mouseX >= getX() + getWidth() || mouseY < listTop() || mouseY >= listBottom) {
             return false;
         }
-        int maxScroll = Math.max(0, rows().size() - visible);
+        int maxScroll = Math.max(0, usedSlots().size() - visible);
         if (maxScroll > 0 && scrollY != 0) {
             scrollRow = Math.min(Math.max(scrollRow - (int) Math.signum(scrollY), 0), maxScroll);
         }
