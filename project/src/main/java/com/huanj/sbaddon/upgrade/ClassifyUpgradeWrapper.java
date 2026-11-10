@@ -11,8 +11,10 @@ import net.minecraft.resources.ResourceLocation;
 import net.minecraft.core.registries.BuiltInRegistries;
 
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.function.Consumer;
 
 /**
@@ -26,6 +28,8 @@ public class ClassifyUpgradeWrapper extends UpgradeWrapperBase<ClassifyUpgradeWr
     public static final String TAG_COLLAPSED = "Collapsed";
     /** 当前子页：0 = 列表，1 = 配置。 */
     public static final String TAG_VIEW = "View";
+    /** 自定义分类名：分组 key → 玩家改过的名字。 */
+    public static final String TAG_NAMES = "Names";
 
     public static final int VIEW_LIST = 0;
     public static final int VIEW_CONFIG = 1;
@@ -80,6 +84,60 @@ public class ClassifyUpgradeWrapper extends UpgradeWrapperBase<ClassifyUpgradeWr
         CompoundTag collapsedTag = data.contains(TAG_COLLAPSED) ? data.getCompound(TAG_COLLAPSED) : new CompoundTag();
         collapsedTag.putBoolean(namespace, collapsed);
         data.put(TAG_COLLAPSED, collapsedTag);
+        setData(data);
+    }
+
+    // ---------------------------------------------------------------- 自定义分类名
+
+    /** 全部自定义名（分组 key → 名字）。 */
+    public Map<String, String> getCustomNames() {
+        CompoundTag data = data();
+        Map<String, String> names = new LinkedHashMap<>();
+        if (!data.contains(TAG_NAMES)) {
+            return names;
+        }
+        CompoundTag tag = data.getCompound(TAG_NAMES);
+        for (String key : tag.getAllKeys()) {
+            String name = tag.getString(key);
+            if (!name.isBlank()) {
+                names.put(key, name);
+            }
+        }
+        return names;
+    }
+
+    public String getCustomName(String groupId) {
+        if (groupId == null || groupId.isEmpty()) {
+            return null;
+        }
+        CompoundTag data = data();
+        if (!data.contains(TAG_NAMES)) {
+            return null;
+        }
+        String name = data.getCompound(TAG_NAMES).getString(groupId);
+        return name.isBlank() ? null : name;
+    }
+
+    /**
+     * 改名；传空串等于恢复默认名 —— 直接把这个 key 从表里删掉，
+     * 免得 NBT 里堆一堆空串。
+     */
+    public void setCustomName(String groupId, String name) {
+        if (groupId == null || groupId.isEmpty()) {
+            return;
+        }
+        CompoundTag data = data();
+        CompoundTag names = data.contains(TAG_NAMES) ? data.getCompound(TAG_NAMES) : new CompoundTag();
+        if (name == null || name.isBlank()) {
+            names.remove(groupId);
+        } else {
+            names.putString(groupId, name.strip());
+        }
+        if (names.isEmpty()) {
+            data.remove(TAG_NAMES);
+        } else {
+            data.put(TAG_NAMES, names);
+        }
         setData(data);
     }
 

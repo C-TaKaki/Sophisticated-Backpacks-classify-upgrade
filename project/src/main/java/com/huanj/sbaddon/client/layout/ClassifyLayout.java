@@ -70,7 +70,8 @@ public final class ClassifyLayout {
         List<ItemStack> samples = container.getSampleStacks();
         // 分组来源统一：模组样本 → 按命名空间；属性过滤器样本 → 按过滤器自带的匹配逻辑。
         // Create 缺席 / 过滤器不可解析时该样本不产生分组，模组分类照常工作。
-        List<ClassifyGroup> groups = ClassifyGroups.build(samples, Minecraft.getInstance().level);
+        List<ClassifyGroup> groups = ClassifyGroups.build(samples, Minecraft.getInstance().level,
+                container.getCustomNames());
 
         SlotMemory.syncMenu(menu, storageSlots);
 

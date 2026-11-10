@@ -169,6 +169,33 @@ public final class CreateAttributeFilterCompat {
     }
 
     /**
+     * 过滤器自身的摘要行（Create 的 tooltip 内容：第一行是匹配模式，之后每行一条属性）。
+     *
+     * @return 摘要；不可用或取不到返回 {@code null}
+     */
+    public static List<net.minecraft.network.chat.Component> summary(ItemStack filter) {
+        if (!isAttributeFilter(filter) || !isAvailable()) {
+            return null;
+        }
+        try {
+            Method makeSummary = filter.getItem().getClass().getMethod("makeSummary", ItemStack.class);
+            Object result = makeSummary.invoke(filter.getItem(), filter);
+            if (result instanceof List<?> lines && !lines.isEmpty()) {
+                List<net.minecraft.network.chat.Component> out = new java.util.ArrayList<>(lines.size());
+                for (Object line : lines) {
+                    if (line instanceof net.minecraft.network.chat.Component component) {
+                        out.add(component);
+                    }
+                }
+                return out.isEmpty() ? null : out;
+            }
+        } catch (Throwable ignored) {
+            // 版本差异 / 实例类型不对：调用方退回只显示名字
+        }
+        return null;
+    }
+
+    /**
      * 过滤器的稳定标识片段：同一份配置得到同一个串，不同配置得到不同串。
      * <p>
      * 只用于分组 key（折叠记忆 / 取物空洞归属），不需要密码学级唯一。

@@ -1,11 +1,24 @@
 # Sync external mods, then launch the NeoForge dev client (game dir: project\run).
 # 关闭游戏窗口后会把本局启动的 JVM / Gradle 守护进程一并清理干净，脚本返回时不留后台进程。
-# 用法：run-client.ps1 -QuickPlay "新的世界"  → 跳过主菜单直接进该存档；不带参数则正常启动
-param([string]$QuickPlay)
+# 用法：run-client.ps1 [-QuickPlay "存档名"] [-NoQuickPlay]
+#   -QuickPlay   指定存档；不给则自动进「最近修改过的存档」
+#   -NoQuickPlay 停在主菜单
+# 窗口出现后自动最大化（见脚本里的 Win32 监视任务）
+param([string]$QuickPlay, [switch]$NoQuickPlay)
 
 $ErrorActionPreference = 'Stop'
 $root = $PSScriptRoot
 & (Join-Path $root 'sync-mods.ps1')
+
+# 默认进最近修改的存档：省掉每次手点「单人游戏 -> 进入世界」
+if (-not $QuickPlay -and -not $NoQuickPlay) {
+    $savesDir = Join-Path $root 'project\run\saves'
+    if (Test-Path -LiteralPath $savesDir) {
+        $latest = Get-ChildItem -LiteralPath $savesDir -Directory -ErrorAction SilentlyContinue |
+            Sort-Object LastWriteTime -Descending | Select-Object -First 1
+        if ($latest) { $QuickPlay = $latest.Name }
+    }
+}
 
 # build.gradle 会读这个文件拼 --quickPlaySingleplayer（走文件是为了避开 gradlew.bat 拆参数）
 $quickPlayFile = Join-Path $root 'project\quickplay.txt'
@@ -41,12 +54,66 @@ function Get-DevClientJava {
 $preexisting = @{}
 Get-DevClientJava | ForEach-Object { $preexisting[$_.ProcessId] = $true }
 
+# 窗口最大化：Gradle 的 runClient 会阻塞到游戏关闭，所以在同一会话里起一个后台 Job 轮询窗口标题，
+# 找到开发客户端窗口就调 Win32 ShowWindow(SW_MAXIMIZE) 并置前。游戏退出后这个 Job 会被清掉。
+$maximizeJob = $null
+try {
+    $maximizeJob = Start-Job -ScriptBlock {
+        Add-Type @"
+using System;
+using System.Runtime.InteropServices;
+using System.Text;
+public static class SbaddonWin {
+    public delegate bool EnumWindowsProc(IntPtr hWnd, IntPtr lParam);
+    [DllImport("user32.dll")] public static extern bool EnumWindows(EnumWindowsProc cb, IntPtr lParam);
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)] public static extern int GetWindowText(IntPtr hWnd, StringBuilder text, int count);
+    [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr hWnd);
+    [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr hWnd, int cmd);
+    [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr hWnd);
+}
+"@
+        $state = @{ Hwnd = [IntPtr]::Zero }
+        $deadline = (Get-Date).AddMinutes(10)
+        while ((Get-Date) -lt $deadline) {
+            $state.Hwnd = [IntPtr]::Zero
+            $callback = [SbaddonWin+EnumWindowsProc] {
+                param($hWnd, $lParam)
+                if ([SbaddonWin]::IsWindowVisible($hWnd)) {
+                    $sb = New-Object System.Text.StringBuilder 512
+                    [void][SbaddonWin]::GetWindowText($hWnd, $sb, 512)
+                    # 开发客户端标题形如 "Minecraft* 1.21.1"
+                    if ($sb.ToString() -like 'Minecraft*') {
+                        $state.Hwnd = $hWnd
+                        return $false
+                    }
+                }
+                return $true
+            }
+            [void][SbaddonWin]::EnumWindows($callback, [IntPtr]::Zero)
+            if ($state.Hwnd -ne [IntPtr]::Zero) {
+                [void][SbaddonWin]::ShowWindow($state.Hwnd, 3)   # SW_MAXIMIZE
+                [void][SbaddonWin]::SetForegroundWindow($state.Hwnd)
+                break
+            }
+            Start-Sleep -Milliseconds 500
+        }
+    }
+} catch {
+    Write-Host "[run-client] 窗口最大化任务没起来（不影响游戏）：$($_.Exception.Message)"
+}
+
 Push-Location (Join-Path $root 'project')
 try {
     & .\gradlew.bat runClient --console=plain @args
     $code = $LASTEXITCODE
 } finally {
     Pop-Location
+}
+
+# 游戏已经关了，最大化监视任务没用了
+if ($maximizeJob) {
+    Stop-Job $maximizeJob -ErrorAction SilentlyContinue
+    Remove-Job $maximizeJob -Force -ErrorAction SilentlyContinue
 }
 
 # 1) gradlew 已经返回，但游戏 JVM 可能还在收尾（写存档 / 释放资源），给它 10 秒自然退出

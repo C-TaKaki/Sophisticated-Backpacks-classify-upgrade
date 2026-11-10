@@ -16,6 +16,7 @@ import net.p3pp3rf1y.sophisticatedcore.common.gui.UpgradeContainerType;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 /**
@@ -35,6 +36,12 @@ public class ClassifyUpgradeContainer extends UpgradeContainerBase<ClassifyUpgra
     private static final String TAG_VIEW = "View";
     private static final String TAG_ORDER = "Order";
     private static final String TAG_AUTO = "AutoClassify";
+    private static final String TAG_RENAME = "Rename";
+    private static final String TAG_RENAME_ID = "Id";
+    private static final String TAG_RENAME_NAME = "Name";
+
+    /** 分类名长度上限 —— 列表行只有 ~100px，再长也显示不出来。 */
+    public static final int MAX_NAME_LENGTH = 32;
 
     private final SampleHandler samples;
 
@@ -100,6 +107,20 @@ public class ClassifyUpgradeContainer extends UpgradeContainerBase<ClassifyUpgra
         return ClassifyUpgradeWrapper.modWhitelist(getSampleStacks());
     }
 
+    /** 玩家改过的分类名（分组 key → 名字）。 */
+    public Map<String, String> getCustomNames() {
+        return upgradeWrapper.getCustomNames();
+    }
+
+    /** 本地立即改名（客户端乐观更新 / 服务端落盘），两边都走这里。 */
+    public void applyRename(String groupId, String name) {
+        String cleaned = name == null ? "" : name.strip();
+        if (cleaned.length() > MAX_NAME_LENGTH) {
+            cleaned = cleaned.substring(0, MAX_NAME_LENGTH);
+        }
+        upgradeWrapper.setCustomName(groupId, cleaned);
+    }
+
     /** 升级是否启用（升级槽左侧的那个开关）。关掉时背包网格恢复原版排版，不做分类。 */
     public boolean isUpgradeEnabled() {
         return upgradeWrapper.isEnabled();
@@ -131,6 +152,10 @@ public class ClassifyUpgradeContainer extends UpgradeContainerBase<ClassifyUpgra
         }
         if (tag.contains(TAG_AUTO)) {
             autoClassify();
+        }
+        if (tag.contains(TAG_RENAME)) {
+            CompoundTag rename = tag.getCompound(TAG_RENAME);
+            applyRename(rename.getString(TAG_RENAME_ID), rename.getString(TAG_RENAME_NAME));
         }
     }
 
@@ -196,6 +221,21 @@ public class ClassifyUpgradeContainer extends UpgradeContainerBase<ClassifyUpgra
     public static CompoundTag autoClassifyTag() {
         CompoundTag tag = new CompoundTag();
         tag.putBoolean(TAG_AUTO, true);
+        return tag;
+    }
+
+    /**
+     * 重命名分类标签。
+     * <p>
+     * 名字存在升级物品的 CUSTOM_DATA 里，只能由服务端写；客户端先本地应用一遍保证界面即时反馈，
+     * 服务端落盘后随升级物品同步回来。
+     */
+    public static CompoundTag renameTag(String groupId, String name) {
+        CompoundTag payload = new CompoundTag();
+        payload.putString(TAG_RENAME_ID, groupId == null ? "" : groupId);
+        payload.putString(TAG_RENAME_NAME, name == null ? "" : name);
+        CompoundTag tag = new CompoundTag();
+        tag.put(TAG_RENAME, payload);
         return tag;
     }
 

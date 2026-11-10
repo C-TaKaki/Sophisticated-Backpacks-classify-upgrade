@@ -4,10 +4,12 @@ import com.huanj.sbaddon.client.BannerBackground;
 import com.huanj.sbaddon.client.ClassifyTab;
 import com.huanj.sbaddon.client.layout.ClassifyGroups;
 import com.huanj.sbaddon.client.layout.ClassifyLayout;
+import com.huanj.sbaddon.compat.create.CreateAttributeFilterCompat;
 import com.huanj.sbaddon.upgrade.ClassifyUpgradeContainer;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.Font;
 import net.minecraft.client.gui.GuiGraphics;
+import net.minecraft.network.chat.Component;
 import net.minecraft.world.inventory.AbstractContainerMenu;
 import net.minecraft.world.inventory.Slot;
 import net.minecraft.world.item.ItemStack;
@@ -23,6 +25,7 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.function.Predicate;
 
@@ -270,8 +273,19 @@ public abstract class StorageScreenBaseMixin {
             return;
         }
         ItemStack stack = hovered.getItem();
-        graphics.renderTooltip(Minecraft.getInstance().font,
-                List.of(ClassifyGroups.describe(stack).label()), Optional.empty(), mouseX, mouseY);
+        List<Component> lines;
+        List<Component> summary = CreateAttributeFilterCompat.summary(stack);
+        if (summary != null) {
+            // 属性过滤器：直接展示 Create 自己算出来的摘要（匹配模式 + 每条属性）
+            lines = summary;
+        } else {
+            StorageScreenBase<?> self = (StorageScreenBase<?>) (Object) this;
+            ClassifyUpgradeContainer container = self.getMenu() instanceof StorageContainerMenuBase<?> menu
+                    ? sbaddon$findContainer(menu) : null;
+            Map<String, String> names = container != null ? container.getCustomNames() : Map.of();
+            lines = List.of(ClassifyGroups.describe(stack, names).label());
+        }
+        graphics.renderTooltip(Minecraft.getInstance().font, lines, Optional.empty(), mouseX, mouseY);
         ci.cancel();
     }
 

@@ -10,6 +10,7 @@ import net.minecraft.world.inventory.Slot;
 import net.minecraft.world.item.ItemStack;
 import net.p3pp3rf1y.sophisticatedcore.client.gui.StorageScreenBase;
 import net.p3pp3rf1y.sophisticatedcore.client.gui.UpgradeSettingsTab;
+import net.p3pp3rf1y.sophisticatedcore.client.gui.controls.TextBox;
 import net.p3pp3rf1y.sophisticatedcore.client.gui.utils.Dimension;
 import net.p3pp3rf1y.sophisticatedcore.client.gui.utils.GuiHelper;
 import net.p3pp3rf1y.sophisticatedcore.client.gui.utils.Position;
@@ -36,6 +37,7 @@ public class ClassifyTab extends UpgradeSettingsTab<ClassifyUpgradeContainer> {
     private static final int ROW_FILL_H = 18;
     private static final int HANDLE_W = 9;
     private static final int DELETE_W = 9;
+    private static final int EDIT_W = 9;
     private static final int CELL = 18;
     private static final int SCROLLBAR_W = 3;
     /** 底部固定行右侧的「一键分类」按钮。 */
@@ -70,6 +72,11 @@ public class ClassifyTab extends UpgradeSettingsTab<ClassifyUpgradeContainer> {
 
     /** 行索引 → 当前渲染 y（绝对坐标）。拖动让位时朝目标值插值，形成平滑移动。 */
     private final java.util.Map<Integer, Float> rowDisplayY = new java.util.HashMap<>();
+
+    /** 正在改名的那一行（行索引）；-1 = 没在改名。 */
+    private int editingRow = -1;
+    /** 改名输入框：懒创建一次，之后复用（隐藏而不销毁，避免和 Screen 的 children 列表较劲）。 */
+    private RenameBox renameBox;
 
     /** 上一帧的滚动行，用来识别"滚动发生了"——滚动不播让位动画，内容直接跳到新位置。 */
     private int lastScrollRow;
@@ -296,6 +303,7 @@ public class ClassifyTab extends UpgradeSettingsTab<ClassifyUpgradeContainer> {
         super.renderWidget(graphics, mouseX, mouseY, partialTick);
         if (!getContainer().isOpen()) {
             // 页签收起时不再排版，否则槽位会被重新摆回面板位置，物品就"漏"到界面外
+            cancelRename();
             if (activeTab == this) {
                 activeTab = null;
             }
@@ -315,6 +323,96 @@ public class ClassifyTab extends UpgradeSettingsTab<ClassifyUpgradeContainer> {
         drawList(graphics, mouseX, mouseY, entries);
         drawPinnedRow(graphics, mouseX, mouseY);
         drawScrollbar(graphics, entries.size(), visible);
+        syncRenameBox();
+    }
+
+    // ---------------------------------------------------------------- 改名
+
+    /**
+     * 改名输入框是懒创建的：挂在 Screen 的 children 上（走它的键盘事件分发），
+     * 关闭编辑时只隐藏不销毁 —— 自己从 Screen 里摘除要走 protected 方法，不值当。
+     * <p>
+     * 交互约定：回车保存；点别处 / 按 Esc（都表现为失焦）取消。
+     */
+    private void syncRenameBox() {
+        if (editingRow < 0 || renameBox == null) {
+            return;
+        }
+        if (screen.getFocused() != renameBox) {
+            cancelRename();
+            return;
+        }
+        renameBox.setPosition(new Position(rowX(), Math.round(displayY(editingRow))));
+    }
+
+    private void startRename(int row) {
+        List<Integer> entries = usedSlots();
+        if (row < 0 || row >= entries.size()) {
+            return;
+        }
+        ItemStack sample = getContainer().getSamples().getStackInSlot(entries.get(row));
+        String groupId = ClassifyGroups.groupId(sample);
+        if (groupId == null) {
+            return;
+        }
+        if (renameBox == null) {
+            renameBox = new RenameBox(new Position(rowX(), 0), new Dimension(rowWidth(), ROW_FILL_H));
+            renameBox.setMaxLength(ClassifyUpgradeContainer.MAX_NAME_LENGTH);
+            ((com.huanj.sbaddon.mixin.ScreenAccess) screen).sbaddon$addRenderableWidget(renameBox);
+        }
+        editingRow = row;
+        // 输入框预填当前显示的名字（含自定义名），玩家想恢复默认就把它清空
+        renameBox.setValue(ClassifyGroups.describe(sample, getContainer().getCustomNames()).label().getString());
+        renameBox.setPosition(new Position(rowX(), Math.round(displayY(row))));
+        renameBox.setVisible(true);
+        screen.setFocused(renameBox);
+        renameBox.setFocused(true);
+    }
+
+    /** 回车提交：名字和默认名一致就当作"恢复默认"，把 NBT 里那条记录删掉。 */
+    private void commitRename() {
+        if (editingRow < 0 || renameBox == null) {
+            return;
+        }
+        List<Integer> entries = usedSlots();
+        if (editingRow < entries.size()) {
+            ItemStack sample = getContainer().getSamples().getStackInSlot(entries.get(editingRow));
+            String groupId = ClassifyGroups.groupId(sample);
+            String typed = renameBox.getValue().strip();
+            String defaultLabel = ClassifyGroups.describe(sample, java.util.Map.of()).label().getString();
+            if (typed.equals(defaultLabel)) {
+                typed = "";
+            }
+            if (groupId != null) {
+                String name = typed;
+                getContainer().applyRename(groupId, name);
+                getContainer().sendDataToServer(() -> ClassifyUpgradeContainer.renameTag(groupId, name));
+            }
+        }
+        cancelRename();
+    }
+
+    private void cancelRename() {
+        editingRow = -1;
+        if (renameBox != null) {
+            renameBox.setVisible(false);
+            renameBox.setFocused(false);
+            if (screen.getFocused() == renameBox) {
+                screen.setFocused(null);
+            }
+        }
+    }
+
+    /** 回车 = 保存。TextBox 的 onEnterPressed 是 protected，只能靠子类接。 */
+    private final class RenameBox extends TextBox {
+        RenameBox(Position position, Dimension dimension) {
+            super(position, dimension);
+        }
+
+        @Override
+        protected void onEnterPressed() {
+            commitRename();
+        }
     }
 
     /** 条目行。拖动中的那一行最后画，压在其他行上面。 */
@@ -365,18 +463,23 @@ public class ClassifyTab extends UpgradeSettingsTab<ClassifyUpgradeContainer> {
 
         int handleX = x + w - HANDLE_W - 3;
         int deleteX = handleX - DELETE_W - 1;
+        int editX = deleteX - EDIT_W - 1;
         int nameX = iconX + CELL + 2;
-        int nameW = Math.max(0, deleteX - nameX - 3);
+        int nameW = Math.max(0, editX - nameX - 3);
         String name;
         if (entry) {
             ItemStack sample = getContainer().getSamples().getStackInSlot(slotIndex);
             // 图标与文字交给分组层统一决定：模组样本显示创造页图标，属性过滤器显示它自己
-            ClassifyGroups.Row row = ClassifyGroups.describe(sample);
+            ClassifyGroups.Row row = ClassifyGroups.describe(sample, getContainer().getCustomNames());
             ItemStack icon = row.icon().isEmpty() ? sample : row.icon();
             graphics.renderItem(icon, iconX, iconY);
             name = row.label().getString();
         } else {
             name = Component.translatable("gui.sbaddon.classify.row.empty").getString();
+        }
+        if (entry && r == editingRow) {
+            // 正在改名：输入框盖在这一行上，行文字让位，避免和输入内容叠字
+            name = "";
         }
         graphics.drawString(font, truncate(name, nameW), nameX, y + 5,
                 entry ? COLOR_LABEL : COLOR_LABEL_DIM, false);
@@ -386,11 +489,12 @@ public class ClassifyTab extends UpgradeSettingsTab<ClassifyUpgradeContainer> {
         if (entry) {
             // 拖拽手柄只属于已配置条目；底部「拖入物品添加」行不放手柄
             drawHandle(graphics, handleX, y, h, true);
+            drawEdit(graphics, editX, y, h, inside(mouseX, mouseY, editX, y, EDIT_W, h));
             drawDelete(graphics, deleteX, y, h, inside(mouseX, mouseY, deleteX, y, DELETE_W, h));
         }
 
         if (entry) {
-            rowHits.add(new int[]{r, 1, x, y, w, h, handleX, deleteX});
+            rowHits.add(new int[]{r, 1, x, y, w, h, handleX, deleteX, editX});
         }
     }
 
@@ -413,6 +517,23 @@ public class ClassifyTab extends UpgradeSettingsTab<ClassifyUpgradeContainer> {
         int tw = font.width(label);
         graphics.drawString(font, label, bx + (AUTO_W - tw) / 2, by + 2, 0xFFF2F2F2, false);
         autoButton = new int[]{bx, by, AUTO_W, AUTO_H};
+    }
+
+    /** 行尾的「改名」按钮：一支 45° 铅笔。 */
+    private void drawEdit(GuiGraphics graphics, int x, int y, int h, boolean hovered) {
+        if (hovered) {
+            graphics.fill(x, y + 2, x + EDIT_W, y + h - 2, 0xFF4A6FA3);
+        }
+        int color = hovered ? 0xFFFFFFFF : 0xFF20344D;
+        int size = 7;
+        int cx = x + (EDIT_W - size) / 2;
+        int cy = y + (h - size) / 2;
+        // 笔杆：从左下到右上的对角线
+        for (int i = 0; i < 5; i++) {
+            graphics.fill(cx + i, cy + 5 - i, cx + i + 1, cy + 6 - i, color);
+        }
+        // 笔尖
+        graphics.fill(cx + 5, cy, cx + 7, cy + 2, color);
     }
 
     /** 行尾的删除按钮：标准「×」，点一下直接删掉这条分类（样本槽不可拿取）。 */
@@ -493,6 +614,10 @@ public class ClassifyTab extends UpgradeSettingsTab<ClassifyUpgradeContainer> {
         for (int[] hit : rowHits) {
             if (hit[1] != 1) {
                 continue;
+            }
+            if (hit[8] >= 0 && inside(mouseX, mouseY, hit[8], hit[3], EDIT_W, hit[5])) {
+                startRename(hit[0]);
+                return true;
             }
             if (inside(mouseX, mouseY, hit[7], hit[3], DELETE_W, hit[5])) {
                 deleteEntry(hit[0]);
