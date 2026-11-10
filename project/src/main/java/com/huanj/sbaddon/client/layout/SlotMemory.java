@@ -1,7 +1,9 @@
 package com.huanj.sbaddon.client.layout;
 
 import java.util.HashMap;
+import java.util.LinkedHashSet;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * 记住「每个存储槽上一次装的是哪个分类的物品」。
@@ -26,19 +28,39 @@ public final class SlotMemory {
     /** 存储槽索引 → 当初占用它的分组 key。 */
     private static final Map<Integer, String> OWNER = new HashMap<>();
 
+    /**
+     * 本次会话里「装过物品」的分组。
+     * <p>
+     * 分类被取空后仍要保留横幅，靠的就是这个集合：只要本次打开背包期间它有过物品，
+     * 就继续显示；重新打开背包（{@link #syncMenu} 检测到新菜单）才清空，
+     * 于是"空标签只在重开时隐藏"。
+     */
+    private static final Set<String> ACTIVE_GROUPS = new LinkedHashSet<>();
+
     private static Object lastMenu;
     private static int lastSlotCount = -1;
 
     private SlotMemory() {
     }
 
-    /** 每帧布局前调用：换背包或槽位数量变了，历史位置就没有意义了。 */
+    /** 每帧布局前调用：换背包或槽位数量变了，历史位置和活跃分组都没有意义了。 */
     public static void syncMenu(Object menu, int slotCount) {
         if (menu != lastMenu || slotCount != lastSlotCount) {
             OWNER.clear();
+            ACTIVE_GROUPS.clear();
             lastMenu = menu;
             lastSlotCount = slotCount;
         }
+    }
+
+    /** 这个分组本次会话里装过物品。 */
+    public static void markActive(String groupKey) {
+        ACTIVE_GROUPS.add(groupKey);
+    }
+
+    /** 这个分组本次会话里装过物品（即使现在已经空了，横幅也要留着）。 */
+    public static boolean wasActive(String groupKey) {
+        return ACTIVE_GROUPS.contains(groupKey);
     }
 
     /** 槽里现在装着这个分组的物品。 */

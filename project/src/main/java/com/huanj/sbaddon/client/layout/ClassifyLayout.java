@@ -85,8 +85,11 @@ public final class ClassifyLayout {
             occupied[i] = true;
             String namespace = BuiltInRegistries.ITEM.getKey(stack.getItem()).getNamespace();
             List<Integer> bucket = buckets.get(namespace);
+            String groupKey = bucket != null ? namespace : SlotMemory.FALLBACK;
             // 记住这个槽归属哪个组：物品取走后槽变空，靠它继续占住原来的位置
-            SlotMemory.remember(i, bucket != null ? namespace : SlotMemory.FALLBACK);
+            SlotMemory.remember(i, groupKey);
+            // 这个组本次会话里有过物品 —— 即使等下被取空，横幅也留着，直到重新打开背包
+            SlotMemory.markActive(groupKey);
             if (bucket != null) {
                 bucket.add(i);
             } else {
@@ -111,20 +114,20 @@ public final class ClassifyLayout {
 
         int row = 0;
         for (Map.Entry<String, List<Integer>> entry : buckets.entrySet()) {
-            List<Integer> merged = mergeHoles(entry.getValue(), entry.getKey(), holes, claimed);
-            if (merged == null) {
+            String groupKey = entry.getKey();
+            if (entry.getValue().isEmpty() && !SlotMemory.wasActive(groupKey)) {
+                // 本次会话里从没装过这个分类的东西：不画横幅。重新打开背包后也会走这里，
+                // 所以"空标签只在重开时隐藏"自然成立
                 continue;
             }
-            row = placeGroup(row, cols, rows, scrollRows, entry.getKey(), iconFor(samples, entry.getKey()),
+            List<Integer> merged = mergeHoles(entry.getValue(), groupKey, holes, claimed);
+            row = placeGroup(row, cols, rows, scrollRows, groupKey, iconFor(samples, groupKey),
                     merged, originX, originY, banners, placements, gaps);
         }
-        if (!fallback.isEmpty()) {
+        if (!fallback.isEmpty() || SlotMemory.wasActive(SlotMemory.FALLBACK)) {
             List<Integer> merged = mergeHoles(fallback, SlotMemory.FALLBACK, holes, claimed);
-            if (merged != null) {
-                String fallbackNamespace = null;
-                row = placeGroup(row, cols, rows, scrollRows, "", iconFor(samples, fallbackNamespace),
-                        merged, originX, originY, banners, placements, gaps);
-            }
+            row = placeGroup(row, cols, rows, scrollRows, "", iconFor(samples, null),
+                    merged, originX, originY, banners, placements, gaps);
         }
         int contentRows = row;
 
@@ -182,8 +185,8 @@ public final class ClassifyLayout {
      * 把该组的空洞并进真实物品序列。两者都按存储槽索引排，所以空洞正好落回原位 ——
      * 后面的物品就不会往前补位。
      * <p>
-     * 组里已经没有任何真实物品时，空洞无处可挂，顺手释放，让这些槽回到普通空槽池；
-     * 否则它们会被永远记住、永远占着那一格。
+     * 物品被全部取走时，这里仍然返回"只剩空洞（或空列表）"的序列：调用方会照常画横幅，
+     * 标签不会消失。空标签的隐藏交给「重新打开背包」——那时 {@code wasActive} 已重置。
      */
     private static List<Integer> mergeHoles(List<Integer> items, String groupKey,
                                             Set<Integer> holes, Set<Integer> claimed) {
@@ -192,13 +195,6 @@ public final class ClassifyLayout {
             if (groupKey.equals(SlotMemory.ownerOf(slot))) {
                 groupHoles.add(slot);
             }
-        }
-        if (items.isEmpty()) {
-            for (int slot : groupHoles) {
-                holes.remove(slot);
-                SlotMemory.forget(slot);
-            }
-            return null;
         }
         if (groupHoles.isEmpty()) {
             return items;
