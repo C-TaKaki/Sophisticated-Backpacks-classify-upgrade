@@ -70,6 +70,9 @@ public class ClassifyTab extends UpgradeSettingsTab<ClassifyUpgradeContainer> {
     /** 行索引 → 当前渲染 y（绝对坐标）。拖动让位时朝目标值插值，形成平滑移动。 */
     private final java.util.Map<Integer, Float> rowDisplayY = new java.util.HashMap<>();
 
+    /** 上一帧的滚动行，用来识别"滚动发生了"——滚动不播让位动画，内容直接跳到新位置。 */
+    private int lastScrollRow;
+
     public ClassifyTab(ClassifyUpgradeContainer container, Position position, StorageScreenBase<?> screen) {
         super(container, position, screen,
                 Component.translatable("gui.sbaddon.classify.title"),
@@ -238,6 +241,12 @@ public class ClassifyTab extends UpgradeSettingsTab<ClassifyUpgradeContainer> {
 
     /** 每帧刷新一次所有可见行的显示位置。 */
     private void updateRowPositions(List<Integer> entries) {
+        if (scrollRow != lastScrollRow) {
+            // 滚动时内容整列平移，插值会变成"从上往下滑"的补偿动画 —— 直接丢掉缓存，
+            // 让每行瞬间落到新位置，滚动过程保持稳定
+            rowDisplayY.clear();
+            lastScrollRow = scrollRow;
+        }
         int visible = rowsVisible();
         rowDisplayY.keySet().removeIf(r -> r >= entries.size());
         for (int r = scrollRow; r < entries.size() && r < scrollRow + visible; r++) {
@@ -493,7 +502,20 @@ public class ClassifyTab extends UpgradeSettingsTab<ClassifyUpgradeContainer> {
             if (usedCount <= 0) {
                 return true;
             }
-            int row = scrollRow + (int) Math.floor((mouseY - listTop()) / (double) ROW_H);
+            int visible = rowsVisible();
+            int maxScroll = Math.max(0, usedCount - visible);
+            int top = listTop();
+            int bottom = top + visible * ROW_H;
+
+            // 拖到列表上下边缘（还在列表范围内、没越界）就自动滚动一行，
+            // 这样才能把条目拖到当前看不见的位置
+            if (mouseY < top + ROW_H && scrollRow > 0) {
+                scrollRow--;
+            } else if (mouseY > bottom - ROW_H && scrollRow < maxScroll) {
+                scrollRow++;
+            }
+
+            int row = scrollRow + (int) Math.floor((mouseY - top) / (double) ROW_H);
             dragTargetRow = Math.min(Math.max(row, 0), usedCount - 1);
             return true;
         }
