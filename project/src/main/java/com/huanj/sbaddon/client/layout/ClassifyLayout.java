@@ -8,9 +8,13 @@ import net.minecraft.world.item.ItemStack;
 import net.p3pp3rf1y.sophisticatedcore.common.gui.StorageContainerMenuBase;
 
 import java.util.ArrayList;
+import java.util.HashSet;
+import java.util.Iterator;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.function.Predicate;
 
 /**
@@ -59,6 +63,8 @@ public final class ClassifyLayout {
         List<String> whitelist = container.getModWhitelist();
         List<ItemStack> samples = container.getSampleStacks();
 
+        SlotMemory.syncMenu(menu, storageSlots);
+
         Map<String, List<Integer>> buckets = new LinkedHashMap<>();
         for (String namespace : whitelist) {
             buckets.put(namespace, new ArrayList<>());
@@ -79,12 +85,23 @@ public final class ClassifyLayout {
             occupied[i] = true;
             String namespace = BuiltInRegistries.ITEM.getKey(stack.getItem()).getNamespace();
             List<Integer> bucket = buckets.get(namespace);
+            // 记住这个槽归属哪个组：物品取走后槽变空，靠它继续占住原来的位置
+            SlotMemory.remember(i, bucket != null ? namespace : SlotMemory.FALLBACK);
             if (bucket != null) {
                 bucket.add(i);
             } else {
                 fallback.add(i);
             }
         }
+
+        // 空着但仍记着归属的槽 = 取物留下的空洞。它们会被塞回原组，挡住"后面的物品往前补位"
+        Set<Integer> holes = new LinkedHashSet<>();
+        for (int i = 0; i < storageSlots; i++) {
+            if (!occupied[i] && SlotMemory.ownerOf(i) != null) {
+                holes.add(i);
+            }
+        }
+        Set<Integer> claimed = new HashSet<>();
 
         // 兜底组不再自己排序：直接沿用存储槽的原始顺序，而 SB 的排序按钮会重排实际物品，
         // 所以"跟随背包自带排序"是自然成立的。
@@ -94,22 +111,36 @@ public final class ClassifyLayout {
 
         int row = 0;
         for (Map.Entry<String, List<Integer>> entry : buckets.entrySet()) {
-            if (entry.getValue().isEmpty()) {
+            List<Integer> merged = mergeHoles(entry.getValue(), entry.getKey(), holes, claimed);
+            if (merged == null) {
                 continue;
             }
             row = placeGroup(row, cols, rows, scrollRows, entry.getKey(), iconFor(samples, entry.getKey()),
-                    entry.getValue(), originX, originY, banners, placements, gaps);
+                    merged, originX, originY, banners, placements, gaps);
         }
         if (!fallback.isEmpty()) {
-            String fallbackNamespace = null;
-            row = placeGroup(row, cols, rows, scrollRows, "", iconFor(samples, fallbackNamespace),
-                    fallback, originX, originY, banners, placements, gaps);
+            List<Integer> merged = mergeHoles(fallback, SlotMemory.FALLBACK, holes, claimed);
+            if (merged != null) {
+                String fallbackNamespace = null;
+                row = placeGroup(row, cols, rows, scrollRows, "", iconFor(samples, fallbackNamespace),
+                        merged, originX, originY, banners, placements, gaps);
+            }
         }
         int contentRows = row;
 
+        // 没被任何现存组认领的空洞（例如白名单里删掉了那个分类）→ 释放，回到普通空槽池
+        Iterator<Integer> remaining = holes.iterator();
+        while (remaining.hasNext()) {
+            int slot = remaining.next();
+            if (!claimed.contains(slot)) {
+                SlotMemory.forget(slot);
+                remaining.remove();
+            }
+        }
+
         List<Integer> emptySlots = new ArrayList<>();
         for (int i = 0; i < storageSlots; i++) {
-            if (!occupied[i]) {
+            if (!occupied[i] && !holes.contains(i)) {
                 emptySlots.add(i);
             }
         }
@@ -145,6 +176,39 @@ public final class ClassifyLayout {
         int totalRows = tailCol > 0 ? tailRow + 1 : tailRow;
 
         return new Result(banners, placements, totalRows);
+    }
+
+    /**
+     * 把该组的空洞并进真实物品序列。两者都按存储槽索引排，所以空洞正好落回原位 ——
+     * 后面的物品就不会往前补位。
+     * <p>
+     * 组里已经没有任何真实物品时，空洞无处可挂，顺手释放，让这些槽回到普通空槽池；
+     * 否则它们会被永远记住、永远占着那一格。
+     */
+    private static List<Integer> mergeHoles(List<Integer> items, String groupKey,
+                                            Set<Integer> holes, Set<Integer> claimed) {
+        List<Integer> groupHoles = new ArrayList<>();
+        for (int slot : holes) {
+            if (groupKey.equals(SlotMemory.ownerOf(slot))) {
+                groupHoles.add(slot);
+            }
+        }
+        if (items.isEmpty()) {
+            for (int slot : groupHoles) {
+                holes.remove(slot);
+                SlotMemory.forget(slot);
+            }
+            return null;
+        }
+        if (groupHoles.isEmpty()) {
+            return items;
+        }
+        List<Integer> merged = new ArrayList<>(items.size() + groupHoles.size());
+        merged.addAll(items);
+        merged.addAll(groupHoles);
+        merged.sort(Integer::compareTo);
+        claimed.addAll(groupHoles);
+        return merged;
     }
 
     private static int placeGroup(int row, int cols, int rows, int scrollRows, String namespace, ItemStack icon,
