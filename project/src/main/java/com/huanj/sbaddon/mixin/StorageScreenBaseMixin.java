@@ -40,7 +40,7 @@ public abstract class StorageScreenBaseMixin {
 
     /** 横幅里图标和文字整体的右移量。 */
     @Unique
-    private static final int ICON_TEXT_SHIFT = 10;
+    private static final int ICON_TEXT_SHIFT = 4;
 
     @Unique
     private int sbaddon$originX = Integer.MIN_VALUE;
