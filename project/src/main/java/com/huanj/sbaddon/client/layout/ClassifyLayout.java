@@ -37,7 +37,7 @@ public final class ClassifyLayout {
     public static final int BANNER_GAP = 0;
 
     /** 横幅贴图四边向内缩进的像素数。 */
-    public static final int BANNER_INSET = 3;
+    public static final int BANNER_INSET = 1;
 
     private ClassifyLayout() {
     }
