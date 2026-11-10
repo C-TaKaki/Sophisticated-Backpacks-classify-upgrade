@@ -197,8 +197,16 @@ public abstract class StorageScreenBaseMixin {
         cir.setReturnValue(true);
     }
 
-    @Inject(method = "render", at = @At("TAIL"))
-    private void sbaddon$drawBanners(GuiGraphics graphics, int mouseX, int mouseY, float partialTick, CallbackInfo ci) {
+    /**
+     * 横幅画在 {@code renderBg} 末尾（order 大于格子背景那次注入，排在它后面），
+     * 这样它只盖住背包底图和格子线；物品、文字、tooltip 都是之后画的，不会被横幅压住。
+     * <p>
+     * 早前注入在 {@code render} 的 TAIL，结果连 tooltip 都被横幅盖了 —— tooltip 虽然是
+     * {@code render} 之后才提交的，但和横幅 blit 不在同一个渲染批次里，顺序不可控。
+     */
+    @Inject(method = "renderBg", at = @At("TAIL"), order = 1100)
+    private void sbaddon$drawBanners(GuiGraphics graphics, float partialTick, int mouseX, int mouseY,
+                                     CallbackInfo ci) {
         if (sbaddon$banners.isEmpty()) {
             return;
         }
