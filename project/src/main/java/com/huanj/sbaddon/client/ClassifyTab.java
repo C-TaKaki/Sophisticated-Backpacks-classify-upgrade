@@ -1,5 +1,6 @@
 package com.huanj.sbaddon.client;
 
+import com.huanj.sbaddon.client.layout.ClassifyGroups;
 import com.huanj.sbaddon.upgrade.ClassifyUpgradeContainer;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
@@ -369,10 +370,11 @@ public class ClassifyTab extends UpgradeSettingsTab<ClassifyUpgradeContainer> {
         String name;
         if (entry) {
             ItemStack sample = getContainer().getSamples().getStackInSlot(slotIndex);
-            String namespace = ModNames.namespaceOf(sample);
-            ItemStack icon = ModNames.icon(namespace);
-            graphics.renderItem(icon.isEmpty() ? sample : icon, iconX, iconY);
-            name = ModNames.displayName(namespace).getString();
+            // 图标与文字交给分组层统一决定：模组样本显示创造页图标，属性过滤器显示它自己
+            ClassifyGroups.Row row = ClassifyGroups.describe(sample);
+            ItemStack icon = row.icon().isEmpty() ? sample : row.icon();
+            graphics.renderItem(icon, iconX, iconY);
+            name = row.label().getString();
         } else {
             name = Component.translatable("gui.sbaddon.classify.row.empty").getString();
         }

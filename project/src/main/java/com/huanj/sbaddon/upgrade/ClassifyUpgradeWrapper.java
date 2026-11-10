@@ -1,5 +1,6 @@
 package com.huanj.sbaddon.upgrade;
 
+import com.huanj.sbaddon.compat.create.CreateAttributeFilterCompat;
 import net.minecraft.core.component.DataComponents;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.world.item.ItemStack;
@@ -87,11 +88,14 @@ public class ClassifyUpgradeWrapper extends UpgradeWrapperBase<ClassifyUpgradeWr
     /**
      * 从样本槽按槽位顺序推导白名单：每个槽位的物品取命名空间，去重保序。
      * 这个顺序就是标签组的排列顺序（决策 #5）。
+     * <p>
+     * 属性过滤器样本会被跳过 —— 它自带谓词，属于独立的分类来源，
+     * 不是"create 模组的一个代表物品"（否则会凭空多出一个 create 分类）。
      */
     public static List<String> modWhitelist(List<ItemStack> sampleStacks) {
         LinkedHashSet<String> namespaces = new LinkedHashSet<>();
         for (ItemStack stack : sampleStacks) {
-            if (stack.isEmpty()) {
+            if (stack.isEmpty() || CreateAttributeFilterCompat.isAttributeFilter(stack)) {
                 continue;
             }
             ResourceLocation key = BuiltInRegistries.ITEM.getKey(stack.getItem());

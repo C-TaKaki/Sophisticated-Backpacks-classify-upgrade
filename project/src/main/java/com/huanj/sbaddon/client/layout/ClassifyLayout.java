@@ -2,6 +2,7 @@ package com.huanj.sbaddon.client.layout;
 
 import com.huanj.sbaddon.client.ModNames;
 import com.huanj.sbaddon.upgrade.ClassifyUpgradeContainer;
+import net.minecraft.client.Minecraft;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.network.chat.Component;
 import net.minecraft.world.item.ItemStack;
@@ -66,14 +67,16 @@ public final class ClassifyLayout {
             return Result.empty();
         }
 
-        List<String> whitelist = container.getModWhitelist();
         List<ItemStack> samples = container.getSampleStacks();
+        // 分组来源统一：模组样本 → 按命名空间；属性过滤器样本 → 按过滤器自带的匹配逻辑。
+        // Create 缺席 / 过滤器不可解析时该样本不产生分组，模组分类照常工作。
+        List<ClassifyGroup> groups = ClassifyGroups.build(samples, Minecraft.getInstance().level);
 
         SlotMemory.syncMenu(menu, storageSlots);
 
         Map<String, List<Integer>> buckets = new LinkedHashMap<>();
-        for (String namespace : whitelist) {
-            buckets.put(namespace, new ArrayList<>());
+        for (ClassifyGroup group : groups) {
+            buckets.put(group.id(), new ArrayList<>());
         }
         List<Integer> fallback = new ArrayList<>();
 
@@ -89,9 +92,15 @@ public final class ClassifyLayout {
                 continue;
             }
             occupied[i] = true;
-            String namespace = BuiltInRegistries.ITEM.getKey(stack.getItem()).getNamespace();
-            List<Integer> bucket = buckets.get(namespace);
-            String groupKey = bucket != null ? namespace : SlotMemory.FALLBACK;
+            // 先声明的组优先：属性过滤器排在某个模组组前面时，命中的物品归过滤器
+            String groupKey = SlotMemory.FALLBACK;
+            for (ClassifyGroup group : groups) {
+                if (group.predicate().test(stack)) {
+                    groupKey = group.id();
+                    break;
+                }
+            }
+            List<Integer> bucket = buckets.get(groupKey);
             // 记住这个槽归属哪个组：物品取走后槽变空，靠它继续占住原来的位置
             SlotMemory.remember(i, groupKey);
             // 这个组本次会话里有过物品 —— 即使等下被取空，横幅也留着，直到重新打开背包
@@ -119,20 +128,24 @@ public final class ClassifyLayout {
         List<Cell> gaps = new ArrayList<>();
 
         int row = 0;
-        for (Map.Entry<String, List<Integer>> entry : buckets.entrySet()) {
-            String groupKey = entry.getKey();
-            if (entry.getValue().isEmpty() && !SlotMemory.wasActive(groupKey)) {
+        for (ClassifyGroup group : groups) {
+            List<Integer> items = buckets.get(group.id());
+            if (items == null) {
+                continue;
+            }
+            if (items.isEmpty() && !SlotMemory.wasActive(group.id())) {
                 // 本次会话里从没装过这个分类的东西：不画横幅。重新打开背包后也会走这里，
                 // 所以"空标签只在重开时隐藏"自然成立
                 continue;
             }
-            List<Integer> merged = mergeHoles(entry.getValue(), groupKey, holes, claimed);
-            row = placeGroup(row, cols, rows, scrollRows, groupKey, iconFor(samples, groupKey),
+            List<Integer> merged = mergeHoles(items, group.id(), holes, claimed);
+            row = placeGroup(row, cols, rows, scrollRows, group.label(), group.icon(),
                     merged, originX, originY, banners, placements, gaps);
         }
         if (!fallback.isEmpty() || SlotMemory.wasActive(SlotMemory.FALLBACK)) {
             List<Integer> merged = mergeHoles(fallback, SlotMemory.FALLBACK, holes, claimed);
-            row = placeGroup(row, cols, rows, scrollRows, "", iconFor(samples, null),
+            row = placeGroup(row, cols, rows, scrollRows,
+                    Component.translatable("gui.sbaddon.classify.fallback"), iconFor(samples, null),
                     merged, originX, originY, banners, placements, gaps);
         }
         int contentY = row;
@@ -221,13 +234,9 @@ public final class ClassifyLayout {
      * 摆一个分组：横幅 + 若干行物品。参数和返回值都是「相对内容顶部的像素 y」，
      * 因为横幅行比物品行多占 {@link #BANNER_GAP} 的间距，纯行号算不准。
      */
-    private static int placeGroup(int y, int cols, int rows, int scrollRows, String namespace, ItemStack icon,
+    private static int placeGroup(int y, int cols, int rows, int scrollRows, Component label, ItemStack icon,
                                   List<Integer> items, int originX, int originY,
                                   List<Banner> banners, List<Placement> placements, List<Cell> gaps) {
-        Component label = namespace.isEmpty()
-                ? Component.translatable("gui.sbaddon.classify.fallback")
-                : ModNames.displayName(namespace);
-
         int scrollPx = scrollRows * CELL;
         int viewHeight = rows * CELL;
 

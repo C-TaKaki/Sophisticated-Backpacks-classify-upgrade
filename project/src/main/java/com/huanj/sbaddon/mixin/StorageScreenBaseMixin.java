@@ -2,7 +2,7 @@ package com.huanj.sbaddon.mixin;
 
 import com.huanj.sbaddon.client.BannerBackground;
 import com.huanj.sbaddon.client.ClassifyTab;
-import com.huanj.sbaddon.client.ModNames;
+import com.huanj.sbaddon.client.layout.ClassifyGroups;
 import com.huanj.sbaddon.client.layout.ClassifyLayout;
 import com.huanj.sbaddon.upgrade.ClassifyUpgradeContainer;
 import net.minecraft.client.Minecraft;
@@ -271,7 +271,7 @@ public abstract class StorageScreenBaseMixin {
         }
         ItemStack stack = hovered.getItem();
         graphics.renderTooltip(Minecraft.getInstance().font,
-                List.of(ModNames.displayName(ModNames.namespaceOf(stack))), Optional.empty(), mouseX, mouseY);
+                List.of(ClassifyGroups.describe(stack).label()), Optional.empty(), mouseX, mouseY);
         ci.cancel();
     }
 

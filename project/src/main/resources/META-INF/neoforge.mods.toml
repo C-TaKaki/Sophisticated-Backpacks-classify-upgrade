@@ -40,6 +40,15 @@ versionRange = "[3.26.0,)"
 ordering = "AFTER"
 side = "BOTH"
 
+# 机械动力：属性过滤器（create:attribute_filter）适配。可选依赖 —— 没有 Create 时本模组照常运行，
+# 只是不产出属性过滤器分类。用 AFTER 保证加载顺序在 Create 之后。
+[[dependencies.${mod_id}]]
+modId = "create"
+type = "optional"
+versionRange = "[6.0.0,)"
+ordering = "AFTER"
+side = "BOTH"
+
 # 接管背包网格的槽位布局，实现"按模组分块 + 整行分类横幅"
 [[mixins]]
 config = "sbaddon.mixins.json"

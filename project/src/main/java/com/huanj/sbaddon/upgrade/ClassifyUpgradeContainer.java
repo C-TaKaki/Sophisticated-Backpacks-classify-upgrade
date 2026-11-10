@@ -1,5 +1,6 @@
 package com.huanj.sbaddon.upgrade;
 
+import com.huanj.sbaddon.compat.create.CreateAttributeFilterCompat;
 import net.minecraft.core.HolderLookup;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.nbt.CompoundTag;
@@ -147,13 +148,9 @@ public class ClassifyUpgradeContainer extends UpgradeContainerBase<ClassifyUpgra
             return;
         }
 
-        Set<String> known = new LinkedHashSet<>();
-        for (int i = 0; i < samples.getSlots(); i++) {
-            ItemStack stack = samples.getStackInSlot(i);
-            if (!stack.isEmpty()) {
-                known.add(BuiltInRegistries.ITEM.getKey(stack.getItem()).getNamespace());
-            }
-        }
+        // 已有分类（含属性过滤器）跳过，避免把过滤器物品的命名空间当成已存在的模组
+        Set<String> known = new LinkedHashSet<>(
+                ClassifyUpgradeWrapper.modWhitelist(getSampleStacks()));
 
         List<ItemStack> picks = new ArrayList<>();
         int storageSlots = menu.getNumberOfStorageInventorySlots();
@@ -226,13 +223,29 @@ public class ClassifyUpgradeContainer extends UpgradeContainerBase<ClassifyUpgra
         }
 
         /**
-         * 同一个模组只允许出现一条分类：放进来的物品如果和别的样本槽同属一个命名空间，
-         * 直接拒绝（SB 的幽灵放入会被 mayPlace 挡下，物品仍留在玩家手上）。
+         * 放入规则（SB 的幽灵放入会被这里挡下，物品仍留在玩家手上）：
+         * <ul>
+         *   <li>同一个模组只允许一条分类；</li>
+         *   <li>属性过滤器：只按「同一份配置」去重（不同属性组合是不同分类），
+         *       且不参与命名空间去重 —— 它是独立分类来源，不是 create 模组的代表物品；</li>
+         *   <li>空的 / 黑名单模式的属性过滤器直接拒绝：前者永远匹配不到东西，
+         *       后者会吞掉后面所有分类。</li>
+         * </ul>
          */
         @Override
         public boolean mayPlace(ItemStack stack) {
             if (stack.isEmpty()) {
                 return false;
+            }
+            boolean attributeFilter = CreateAttributeFilterCompat.isAttributeFilter(stack);
+            if (attributeFilter) {
+                int count = CreateAttributeFilterCompat.attributeCount(stack);
+                if (count <= 0) {
+                    return false;
+                }
+                if ("blacklist".equals(CreateAttributeFilterCompat.mode(stack))) {
+                    return false;
+                }
             }
             String namespace = BuiltInRegistries.ITEM.getKey(stack.getItem()).getNamespace();
             for (int i = 0; i < handler.getSlots(); i++) {
@@ -241,6 +254,18 @@ public class ClassifyUpgradeContainer extends UpgradeContainerBase<ClassifyUpgra
                 }
                 ItemStack existing = handler.getStackInSlot(i);
                 if (existing.isEmpty()) {
+                    continue;
+                }
+                boolean existingFilter = CreateAttributeFilterCompat.isAttributeFilter(existing);
+                if (attributeFilter) {
+                    // 同一份过滤器配置只允许一条
+                    if (existingFilter && ItemStack.isSameItemSameComponents(existing, stack)) {
+                        return false;
+                    }
+                    continue;
+                }
+                // 过滤器不占模组分类位
+                if (existingFilter) {
                     continue;
                 }
                 if (BuiltInRegistries.ITEM.getKey(existing.getItem()).getNamespace().equals(namespace)) {
