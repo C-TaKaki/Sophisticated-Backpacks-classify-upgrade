@@ -109,6 +109,7 @@ public final class BannerBackground {
             graphics.fill(x, y, x + width, y + height, PALETTE[4]);
             return;
         }
+        // 每帧一次 blit：图案已烘焙进贴图（早前逐像素 fill 会掉帧，已废弃）
         graphics.blit(location, x, y, 0f, 0f, width, height, width, height);
     }
 
@@ -126,6 +127,7 @@ public final class BannerBackground {
         }
         try {
             NativeImage image = paint(width, height);
+            dumpOnce(image, width, height);
             DynamicTexture texture = new DynamicTexture(image);
             ResourceLocation location = Minecraft.getInstance().getTextureManager()
                     .register("sbaddon_classify_banner", texture);
@@ -138,6 +140,32 @@ public final class BannerBackground {
         }
     }
 
+    private static boolean dumped;
+
+    private static void dumpOnce(NativeImage image, int width, int height) {
+        if (dumped) {
+            return;
+        }
+        dumped = true;
+        try {
+            java.nio.file.Path path = Minecraft.getInstance().gameDirectory.toPath()
+                    .resolve("sbaddon_banner_debug.png");
+            image.writeToFile(path);
+            int opaque = 0;
+            for (int y = 0; y < height; y++) {
+                for (int x = 0; x < width; x++) {
+                    if ((image.getPixelRGBA(x, y) >>> 24) != 0) {
+                        opaque++;
+                    }
+                }
+            }
+            LOGGER.info("[sbaddon] banner texture dumped to {} ({}x{}, opaque={}/{}, pixel(5,3)={})",
+                    path, width, height, opaque, width * height, Integer.toHexString(image.getPixelRGBA(5, 3)));
+        } catch (Exception exception) {
+            LOGGER.warn("[sbaddon] failed to dump banner texture", exception);
+        }
+    }
+
     /** 按图案生成本尺寸的像素图。 */
     private static NativeImage paint(int width, int height) {
         NativeImage image = new NativeImage(width, height, false);
@@ -145,7 +173,7 @@ public final class BannerBackground {
         for (int y = 0; y < height; y++) {
             int sourceRow = rows[y];
             for (int x = 0; x < width; x++) {
-                image.setPixelRGBA(x, y, toNative(colorAt(sourceRow, mapColumn(x, width))));
+                image.setPixelRGBA(x, y, toNative(PALETTE[colorAt(sourceRow, mapColumn(x, width))]));
             }
         }
         return image;
