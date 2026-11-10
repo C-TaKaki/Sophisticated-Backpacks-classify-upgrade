@@ -38,6 +38,10 @@ public abstract class StorageScreenBaseMixin {
     @Unique
     private static final int SBADDON_HIDDEN = -10000;
 
+    /** 横幅里图标和文字整体的右移量。 */
+    @Unique
+    private static final int ICON_TEXT_SHIFT = 10;
+
     @Unique
     private int sbaddon$originX = Integer.MIN_VALUE;
     @Unique
@@ -231,19 +235,19 @@ public abstract class StorageScreenBaseMixin {
             int boxH = ClassifyLayout.CELL - inset * 2;
             BannerBackground.render(graphics, x + inset, y + inset, boxW, boxH);
             if (!banner.icon().isEmpty()) {
-                // 图标缩小 10% 后仍要在 18×18 的格子里水平和垂直居中：
-                // 16×0.9 = 14.4，两侧各留 (18-14.4)/2 = 1.8
+                // 图标缩小 10% 后在 18×18 格子里水平垂直居中（16×0.9=14.4，两侧各留 1.8），
+                // 再整体右移 10px，和文字一起往内让出左边距
                 float iconSize = 16.0f * 0.9f;
-                float offset = (ClassifyLayout.CELL - iconSize) / 2.0f;
+                float offset = (ClassifyLayout.CELL - iconSize) / 2.0f + ICON_TEXT_SHIFT;
                 graphics.pose().pushPose();
-                graphics.pose().translate(x + offset, y + offset, 0.0f);
+                graphics.pose().translate(x + offset, y + (ClassifyLayout.CELL - iconSize) / 2.0f, 0.0f);
                 graphics.pose().scale(0.9f, 0.9f, 1.0f);
                 graphics.renderItem(banner.icon(), 0, 0);
                 graphics.pose().popPose();
             }
             // 模组名过长时按剩余宽度截断加省略号，不让文字冲出横幅
             String label = banner.label().getString();
-            int textLeft = x + 20;
+            int textLeft = x + 20 + ICON_TEXT_SHIFT;
             int textWidth = Math.max(0, right - textLeft - 2);
             if (font.width(label) > textWidth) {
                 label = font.plainSubstrByWidth(label, Math.max(0, textWidth - font.width("..."))) + "...";
