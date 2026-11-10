@@ -78,6 +78,8 @@ public class ClassifyTab extends UpgradeSettingsTab<ClassifyUpgradeContainer> {
     private String editingText = "";
     /** 上一次提交被拒（重名 / 超长）：输入框描边与文字转红。 */
     private boolean editingError;
+    /** Ctrl+A 全选态：下一次输入/退格整体替换。 */
+    private boolean editingSelectAll;
     /** 编辑态下「勾」「叉」的命中区，每帧渲染时写入。 */
     private int[] renameSaveHit;
     private int[] renameCancelHit;
@@ -352,6 +354,7 @@ public class ClassifyTab extends UpgradeSettingsTab<ClassifyUpgradeContainer> {
         // 预填当前显示名（含已改过的自定义名）
         editingText = ClassifyGroups.describe(sample, getContainer().getCustomNames()).label().getString();
         editingError = false;
+        editingSelectAll = false;
     }
 
     /**
@@ -423,6 +426,7 @@ public class ClassifyTab extends UpgradeSettingsTab<ClassifyUpgradeContainer> {
         editingRow = -1;
         editingText = "";
         editingError = false;
+        editingSelectAll = false;
         renameSaveHit = null;
         renameCancelHit = null;
     }
@@ -440,11 +444,20 @@ public class ClassifyTab extends UpgradeSettingsTab<ClassifyUpgradeContainer> {
         switch (keyCode) {
             case 256 -> cancelRename();                 // Esc = 放弃
             case 257, 335 -> commitRename();            // Enter / 小键盘 Enter
-            case 259 -> {                               // Backspace
-                if (!editingText.isEmpty()) {
-                    editingText = editingText.substring(0, editingText.length() - 1);
+            case 65 -> {                                // Ctrl+A 全选
+                if ((modifiers & 2) != 0) {
+                    editingSelectAll = !editingText.isEmpty();
                     editingError = false;
                 }
+            }
+            case 259, 261 -> {                          // Backspace / Delete
+                if (editingSelectAll) {
+                    editingText = "";
+                    editingSelectAll = false;
+                } else if (keyCode == 259 && !editingText.isEmpty()) {
+                    editingText = editingText.substring(0, editingText.length() - 1);
+                }
+                editingError = false;
             }
             case 86 -> {                                // Ctrl+V
                 if ((modifiers & 2) != 0) {
@@ -454,6 +467,7 @@ public class ClassifyTab extends UpgradeSettingsTab<ClassifyUpgradeContainer> {
                     }
                 }
             }
+            case 262, 263 -> editingSelectAll = false;  // ←/→ 取消全选
             default -> {
                 // 编辑态吞掉其它按键（E / Esc 之类不要顺手把背包关掉）
             }
@@ -472,6 +486,11 @@ public class ClassifyTab extends UpgradeSettingsTab<ClassifyUpgradeContainer> {
 
     /** 追加文本并截断到上限；控制字符与「§」直接丢弃（避免染色代码破坏界面）。 */
     private void appendTyped(String text) {
+        if (editingSelectAll) {
+            // 全选态下输入 = 整体替换
+            editingText = "";
+            editingSelectAll = false;
+        }
         for (int i = 0; i < text.length(); i++) {
             char c = text.charAt(i);
             if (c < 32 || c == 167) {
@@ -600,8 +619,12 @@ public class ClassifyTab extends UpgradeSettingsTab<ClassifyUpgradeContainer> {
             shown = shown.substring(1);
         }
         int textColor = editingError ? 0xFFFFA0A0 : 0xFFE8E8E8;
+        if (editingSelectAll && !shown.isEmpty()) {
+            // 全选高亮：整段文字底下铺一条选中色，下一次输入会整体替换
+            graphics.fill(boxX + 2, boxY + 2, boxX + 2 + font.width(shown), boxY + boxH - 2, 0xFF2F5C99);
+        }
         graphics.drawString(font, shown, boxX + 2, boxY + 2, textColor, false);
-        if ((System.currentTimeMillis() / 500L) % 2L == 0L) {
+        if (!editingSelectAll && (System.currentTimeMillis() / 500L) % 2L == 0L) {
             int cursorX = boxX + 2 + font.width(shown);
             graphics.fill(cursorX, boxY + 2, cursorX + 1, boxY + boxH - 2, textColor);
         }
