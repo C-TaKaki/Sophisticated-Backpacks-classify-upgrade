@@ -197,6 +197,16 @@ public class ClassifyTab extends UpgradeSettingsTab<ClassifyUpgradeContainer> {
             slots.get(emptySlot).x = rowIconX() - guiLeft;
             slots.get(emptySlot).y = pinnedRowY() + 1 - guiTop;
         }
+        // 被拖的行滚出可见范围后，它的槽位在上面的循环里被丢到屏幕外了，
+        // 单独摆一次，保证拖动时图标跟着行一起浮动
+        if (draggingRow >= 0 && draggingRow < entries.size()
+                && (draggingRow < scrollRow || draggingRow >= scrollRow + visible)) {
+            int slotIndex = entries.get(draggingRow);
+            if (slotIndex >= 0 && slotIndex < slots.size()) {
+                slots.get(slotIndex).x = rowIconX() - guiLeft;
+                slots.get(slotIndex).y = Math.round(displayY(draggingRow)) + 1 - guiTop;
+            }
+        }
     }
 
     private int rowX() {
@@ -316,7 +326,9 @@ public class ClassifyTab extends UpgradeSettingsTab<ClassifyUpgradeContainer> {
             }
             drawRow(graphics, mouseX, mouseY, r, entries.get(r), true, Math.round(displayY(r)));
         }
-        if (draggingRow >= scrollRow && draggingRow < last) {
+        // 被拖的行**无条件**画：拖动到边缘触发自动滚动后，它原来的索引已经滚出可见范围
+        // （draggingRow < scrollRow），但视觉上必须一直黏在鼠标上，否则看起来像拖丢了
+        if (draggingRow >= 0 && draggingRow < entries.size()) {
             drawRow(graphics, mouseX, mouseY, draggingRow, entries.get(draggingRow), true,
                     Math.round(displayY(draggingRow)));
         }
