@@ -33,6 +33,9 @@ public final class ClassifyLayout {
 
     public static final int CELL = 18;
 
+    /** 分类横幅与下方物品格子之间的空隙。 */
+    public static final int BANNER_GAP = 2;
+
     private ClassifyLayout() {
     }
 
@@ -48,8 +51,8 @@ public final class ClassifyLayout {
         }
     }
 
-    /** 内容行内未被物品占用的单元格，用来摆放空槽。 */
-    private record Cell(int row, int col) {
+    /** 行内未被物品占用的单元格（y 是相对内容顶部的像素坐标），用来摆放空槽。 */
+    private record Cell(int y, int col) {
     }
 
     public static Result compute(StorageContainerMenuBase<?> menu, ClassifyUpgradeContainer container,
@@ -129,7 +132,7 @@ public final class ClassifyLayout {
             row = placeGroup(row, cols, rows, scrollRows, "", iconFor(samples, null),
                     merged, originX, originY, banners, placements, gaps);
         }
-        int contentRows = row;
+        int contentY = row;
 
         // 没被任何现存组认领的空洞（例如白名单里删掉了那个分类）→ 释放，回到普通空槽池
         Iterator<Integer> remaining = holes.iterator();
@@ -148,6 +151,9 @@ public final class ClassifyLayout {
             }
         }
 
+        int scrollPx = scrollRows * CELL;
+        int viewHeight = rows * CELL;
+
         // 1) 先用空槽填满内容行内的空格，让每个可见格子都能放东西
         int cursor = 0;
         for (Cell gap : gaps) {
@@ -155,28 +161,29 @@ public final class ClassifyLayout {
                 break;
             }
             int slotIndex = emptySlots.get(cursor++);
-            int r = gap.row() - scrollRows;
-            if (r >= 0 && r < rows) {
-                placements.add(new Placement(slotIndex, originX + gap.col() * CELL, originY + r * CELL));
+            int y = gap.y() - scrollPx;
+            if (y >= 0 && y < viewHeight) {
+                placements.add(new Placement(slotIndex, originX + gap.col() * CELL, originY + y));
             }
         }
 
         // 2) 剩下的空槽顺着内容之后继续铺
-        int tailRow = contentRows;
+        int tailY = contentY;
         int tailCol = 0;
         while (cursor < emptySlots.size()) {
             int slotIndex = emptySlots.get(cursor++);
-            int r = tailRow - scrollRows;
-            if (r >= 0 && r < rows) {
-                placements.add(new Placement(slotIndex, originX + tailCol * CELL, originY + r * CELL));
+            int y = tailY - scrollPx;
+            if (y >= 0 && y < viewHeight) {
+                placements.add(new Placement(slotIndex, originX + tailCol * CELL, originY + y));
             }
             tailCol++;
             if (tailCol >= cols) {
                 tailCol = 0;
-                tailRow++;
+                tailY += CELL;
             }
         }
-        int totalRows = tailCol > 0 ? tailRow + 1 : tailRow;
+        int totalHeight = contentY + (tailCol > 0 ? CELL : 0);
+        int totalRows = (totalHeight + CELL - 1) / CELL;
 
         return new Result(banners, placements, totalRows);
     }
@@ -207,34 +214,41 @@ public final class ClassifyLayout {
         return merged;
     }
 
-    private static int placeGroup(int row, int cols, int rows, int scrollRows, String namespace, ItemStack icon,
+    /**
+     * 摆一个分组：横幅 + 若干行物品。参数和返回值都是「相对内容顶部的像素 y」，
+     * 因为横幅行比物品行多占 {@link #BANNER_GAP} 的间距，纯行号算不准。
+     */
+    private static int placeGroup(int y, int cols, int rows, int scrollRows, String namespace, ItemStack icon,
                                   List<Integer> items, int originX, int originY,
                                   List<Banner> banners, List<Placement> placements, List<Cell> gaps) {
         Component label = namespace.isEmpty()
                 ? Component.translatable("gui.sbaddon.classify.fallback")
                 : ModNames.displayName(namespace);
 
-        int bannerRow = row - scrollRows;
-        if (bannerRow >= 0 && bannerRow < rows) {
-            banners.add(new Banner(originX, originY + bannerRow * CELL, cols * CELL, icon, label));
-        }
-        row++;
+        int scrollPx = scrollRows * CELL;
+        int viewHeight = rows * CELL;
 
+        int bannerY = y - scrollPx;
+        if (bannerY >= 0 && bannerY < viewHeight) {
+            banners.add(new Banner(originX, originY + bannerY, cols * CELL, icon, label));
+        }
+
+        int itemTop = y + CELL + BANNER_GAP;
         int itemRows = (items.size() + cols - 1) / cols;
         for (int k = 0; k < itemRows * cols; k++) {
-            int r = row + k / cols;
+            int cellY = itemTop + (k / cols) * CELL;
             int c = k % cols;
             if (k >= items.size()) {
                 // 该行剩余空格：先记下来，稍后用空槽填
-                gaps.add(new Cell(r, c));
+                gaps.add(new Cell(cellY, c));
                 continue;
             }
-            int viewRow = r - scrollRows;
-            if (viewRow >= 0 && viewRow < rows) {
-                placements.add(new Placement(items.get(k), originX + c * CELL, originY + viewRow * CELL));
+            int viewY = cellY - scrollPx;
+            if (viewY >= 0 && viewY < viewHeight) {
+                placements.add(new Placement(items.get(k), originX + c * CELL, originY + viewY));
             }
         }
-        return row + itemRows;
+        return itemTop + itemRows * CELL;
     }
 
     private static ItemStack iconFor(List<ItemStack> samples, String namespace) {

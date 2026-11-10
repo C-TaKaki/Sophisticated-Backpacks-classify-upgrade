@@ -7,5 +7,6 @@
   "gui.sbaddon.classify.empty": "没有可显示的物品",
   "gui.sbaddon.classify.fallback": "默认分类",
   "gui.sbaddon.classify.vanilla": "原版",
-  "gui.sbaddon.classify.row.empty": "拖入物品添加"
+  "gui.sbaddon.classify.row.empty": "拖入物品添加",
+  "gui.sbaddon.classify.auto": "一键分类"
 }

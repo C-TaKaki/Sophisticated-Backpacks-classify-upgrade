@@ -7,5 +7,6 @@
   "gui.sbaddon.classify.empty": "Nothing to show",
   "gui.sbaddon.classify.fallback": "Unclassified",
   "gui.sbaddon.classify.vanilla": "Vanilla",
-  "gui.sbaddon.classify.row.empty": "Drop item here"
+  "gui.sbaddon.classify.row.empty": "Drop item here",
+  "gui.sbaddon.classify.auto": "Auto-classify"
 }

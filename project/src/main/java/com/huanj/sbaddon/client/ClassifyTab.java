@@ -37,6 +37,9 @@ public class ClassifyTab extends UpgradeSettingsTab<ClassifyUpgradeContainer> {
     private static final int DELETE_W = 9;
     private static final int CELL = 18;
     private static final int SCROLLBAR_W = 3;
+    /** 底部固定行右侧的「一键分类」按钮。 */
+    private static final int AUTO_W = 44;
+    private static final int AUTO_H = 12;
 
     private static final int COLOR_ROW_BG = 0xFF8E8E8E;
     private static final int COLOR_ROW_HL = 0xFFB8B8B8;
@@ -47,6 +50,9 @@ public class ClassifyTab extends UpgradeSettingsTab<ClassifyUpgradeContainer> {
 
     /** 渲染期缓存的命中区：rowHits[i] = {行号, 是否条目, x, y, w, h, handleX, deleteX}。 */
     private final List<int[]> rowHits = new ArrayList<>();
+
+    /** 「一键分类」按钮的命中区，渲染时写入；不在固定行上时为 null。 */
+    private int[] autoButton;
 
     /** 当前打开的页签实例：SB 的屏幕不把滚轮事件派发给子控件，只能由 mixin 转交过来。 */
     private static ClassifyTab activeTab;
@@ -284,6 +290,7 @@ public class ClassifyTab extends UpgradeSettingsTab<ClassifyUpgradeContainer> {
         updateRowPositions(entries);
         layoutSlots(entries);
         rowHits.clear();
+        autoButton = null;
 
         drawList(graphics, mouseX, mouseY, entries);
         drawPinnedRow(graphics, mouseX, mouseY);
@@ -350,6 +357,9 @@ public class ClassifyTab extends UpgradeSettingsTab<ClassifyUpgradeContainer> {
         }
         graphics.drawString(font, truncate(name, nameW), nameX, y + 5,
                 entry ? COLOR_LABEL : COLOR_LABEL_DIM, false);
+        if (!entry) {
+            drawAutoButton(graphics, mouseX, mouseY, x, y, w, h);
+        }
         drawHandle(graphics, handleX, y, h, entry);
         if (entry) {
             drawDelete(graphics, deleteX, y, h, inside(mouseX, mouseY, deleteX, y, DELETE_W, h));
@@ -358,6 +368,27 @@ public class ClassifyTab extends UpgradeSettingsTab<ClassifyUpgradeContainer> {
         if (entry) {
             rowHits.add(new int[]{r, 1, x, y, w, h, handleX, deleteX});
         }
+    }
+
+    /**
+     * 固定行右侧的「一键分类」按钮：点一下让服务端扫描背包，把每个模组的一个代表物品
+     * 填进空的样本槽。样本槽满了就不画。
+     */
+    private void drawAutoButton(GuiGraphics graphics, int mouseX, int mouseY,
+                                int rowX, int rowY, int rowW, int rowH) {
+        if (firstEmptySlot() < 0) {
+            return;
+        }
+        int bx = rowX + rowW - AUTO_W - 6;
+        int by = rowY + (rowH - AUTO_H) / 2;
+        boolean hovered = inside(mouseX, mouseY, bx, by, AUTO_W, AUTO_H);
+        graphics.fill(bx, by, bx + AUTO_W, by + AUTO_H, hovered ? 0xFF6F8F5A : 0xFF5D7A49);
+        graphics.fill(bx, by, bx + AUTO_W, by + 1, 0xFF9DBB85);
+        graphics.fill(bx, by + AUTO_H - 1, bx + AUTO_W, by + AUTO_H, 0xFF3E5432);
+        String label = Component.translatable("gui.sbaddon.classify.auto").getString();
+        int tw = font.width(label);
+        graphics.drawString(font, label, bx + (AUTO_W - tw) / 2, by + 2, 0xFFF2F2F2, false);
+        autoButton = new int[]{bx, by, AUTO_W, AUTO_H};
     }
 
     /** 行尾的删除按钮：标准「×」，点一下直接删掉这条分类（样本槽不可拿取）。 */
@@ -429,6 +460,11 @@ public class ClassifyTab extends UpgradeSettingsTab<ClassifyUpgradeContainer> {
         }
         if (button != 0) {
             return false;
+        }
+        if (autoButton != null
+                && inside(mouseX, mouseY, autoButton[0], autoButton[1], autoButton[2], autoButton[3])) {
+            getContainer().sendDataToServer(() -> ClassifyUpgradeContainer.autoClassifyTag());
+            return true;
         }
         for (int[] hit : rowHits) {
             if (hit[1] != 1) {

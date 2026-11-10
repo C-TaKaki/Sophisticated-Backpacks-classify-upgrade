@@ -4,6 +4,7 @@
   "package": "com.huanj.sbaddon.mixin",
   "compatibilityLevel": "JAVA_21",
   "client": [
+    "AbstractContainerScreenAccess",
     "StorageContainerMenuBaseMixin",
     "StorageScreenBaseMixin"
   ],

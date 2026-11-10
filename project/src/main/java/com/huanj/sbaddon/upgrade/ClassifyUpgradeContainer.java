@@ -1,17 +1,21 @@
 package com.huanj.sbaddon.upgrade;
 
 import net.minecraft.core.HolderLookup;
+import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.ItemStack;
 import net.neoforged.neoforge.items.ItemStackHandler;
 import net.neoforged.neoforge.items.SlotItemHandler;
 import net.p3pp3rf1y.sophisticatedcore.common.gui.IFilterSlot;
+import net.p3pp3rf1y.sophisticatedcore.common.gui.StorageContainerMenuBase;
 import net.p3pp3rf1y.sophisticatedcore.common.gui.UpgradeContainerBase;
 import net.p3pp3rf1y.sophisticatedcore.common.gui.UpgradeContainerType;
 
 import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Set;
 
 /**
  * 分类升级的容器。
@@ -29,6 +33,7 @@ public class ClassifyUpgradeContainer extends UpgradeContainerBase<ClassifyUpgra
 
     private static final String TAG_VIEW = "View";
     private static final String TAG_ORDER = "Order";
+    private static final String TAG_AUTO = "AutoClassify";
 
     private final SampleHandler samples;
 
@@ -123,6 +128,59 @@ public class ClassifyUpgradeContainer extends UpgradeContainerBase<ClassifyUpgra
         if (tag.contains(TAG_ORDER)) {
             applyOrder(tag.getIntArray(TAG_ORDER));
         }
+        if (tag.contains(TAG_AUTO)) {
+            autoClassify();
+        }
+    }
+
+    /**
+     * 一键分类：扫描当前打开的背包，把每个模组的一个代表物品填进空的样本槽。
+     * <p>
+     * 只在服务端执行 —— 样本槽是真 Slot，服务端改完内容会随菜单自动同步回客户端。
+     * 已经存在的模组跳过，所以可以反复点，不会产生重复分类。
+     */
+    private void autoClassify() {
+        if (player.level().isClientSide()) {
+            return;
+        }
+        if (!(player.containerMenu instanceof StorageContainerMenuBase<?> menu)) {
+            return;
+        }
+
+        Set<String> known = new LinkedHashSet<>();
+        for (int i = 0; i < samples.getSlots(); i++) {
+            ItemStack stack = samples.getStackInSlot(i);
+            if (!stack.isEmpty()) {
+                known.add(BuiltInRegistries.ITEM.getKey(stack.getItem()).getNamespace());
+            }
+        }
+
+        List<ItemStack> picks = new ArrayList<>();
+        int storageSlots = menu.getNumberOfStorageInventorySlots();
+        for (int i = 0; i < storageSlots; i++) {
+            ItemStack stack = menu.getSlot(i).getItem();
+            if (stack.isEmpty()) {
+                continue;
+            }
+            String namespace = BuiltInRegistries.ITEM.getKey(stack.getItem()).getNamespace();
+            // 已有分类跳过；同一模组的第二个物品也跳过（只取第一个当代表）
+            if (known.contains(namespace) || !known.add(namespace)) {
+                continue;
+            }
+            picks.add(stack.copyWithCount(1));
+        }
+
+        int slot = 0;
+        for (ItemStack pick : picks) {
+            while (slot < samples.getSlots() && !samples.getStackInSlot(slot).isEmpty()) {
+                slot++;
+            }
+            if (slot >= samples.getSlots()) {
+                break;
+            }
+            samples.setStackInSlot(slot, pick);
+            slot++;
+        }
     }
 
     public static CompoundTag viewTag(int view) {
@@ -137,6 +195,13 @@ public class ClassifyUpgradeContainer extends UpgradeContainerBase<ClassifyUpgra
         return tag;
     }
 
+    /** 「一键分类」：请求服务端扫描背包并补全分类。 */
+    public static CompoundTag autoClassifyTag() {
+        CompoundTag tag = new CompoundTag();
+        tag.putBoolean(TAG_AUTO, true);
+        return tag;
+    }
+
     /**
      * 样本槽。
      * <p>
@@ -148,8 +213,11 @@ public class ClassifyUpgradeContainer extends UpgradeContainerBase<ClassifyUpgra
      * 删条目走页签行尾的删除按钮（直接改数据并同步），不从槽里取。
      */
     public static class SampleSlot extends SlotItemHandler implements IFilterSlot {
+        private final ItemStackHandler handler;
+
         public SampleSlot(ItemStackHandler handler, int index, int x, int y) {
             super(handler, index, x, y);
+            this.handler = handler;
         }
 
         @Override
@@ -157,9 +225,29 @@ public class ClassifyUpgradeContainer extends UpgradeContainerBase<ClassifyUpgra
             return 1;
         }
 
+        /**
+         * 同一个模组只允许出现一条分类：放进来的物品如果和别的样本槽同属一个命名空间，
+         * 直接拒绝（SB 的幽灵放入会被 mayPlace 挡下，物品仍留在玩家手上）。
+         */
         @Override
         public boolean mayPlace(ItemStack stack) {
-            return !stack.isEmpty();
+            if (stack.isEmpty()) {
+                return false;
+            }
+            String namespace = BuiltInRegistries.ITEM.getKey(stack.getItem()).getNamespace();
+            for (int i = 0; i < handler.getSlots(); i++) {
+                if (i == getSlotIndex()) {
+                    continue;
+                }
+                ItemStack existing = handler.getStackInSlot(i);
+                if (existing.isEmpty()) {
+                    continue;
+                }
+                if (BuiltInRegistries.ITEM.getKey(existing.getItem()).getNamespace().equals(namespace)) {
+                    return false;
+                }
+            }
+            return true;
         }
 
         @Override

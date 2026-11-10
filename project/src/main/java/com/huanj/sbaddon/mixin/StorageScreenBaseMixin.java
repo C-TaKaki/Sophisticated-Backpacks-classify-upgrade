@@ -2,13 +2,16 @@ package com.huanj.sbaddon.mixin;
 
 import com.huanj.sbaddon.client.BannerBackground;
 import com.huanj.sbaddon.client.ClassifyTab;
+import com.huanj.sbaddon.client.ModNames;
 import com.huanj.sbaddon.client.layout.ClassifyLayout;
 import com.huanj.sbaddon.upgrade.ClassifyUpgradeContainer;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.Font;
 import net.minecraft.client.gui.GuiGraphics;
+import net.minecraft.network.chat.Component;
 import net.minecraft.world.inventory.AbstractContainerMenu;
 import net.minecraft.world.inventory.Slot;
+import net.minecraft.world.item.ItemStack;
 import net.p3pp3rf1y.sophisticatedcore.client.gui.StorageScreenBase;
 import net.p3pp3rf1y.sophisticatedcore.common.gui.StorageContainerMenuBase;
 import net.p3pp3rf1y.sophisticatedcore.common.gui.UpgradeContainerBase;
@@ -21,6 +24,7 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 
 import java.util.List;
+import java.util.Optional;
 import java.util.function.Predicate;
 
 /**
@@ -225,17 +229,43 @@ public abstract class StorageScreenBaseMixin {
             // 纯代码绘制的像素横幅底（原图 25×25，中间横向拉伸，四角 1:1）
             BannerBackground.render(graphics, x, y, banner.width(), ClassifyLayout.CELL);
             if (!banner.icon().isEmpty()) {
-                graphics.renderItem(banner.icon(), x + 1, y + 1);
+                // 图标缩小 10% 且右移 4px：pose 缩放到 0.9，再整体往右挪
+                graphics.pose().pushPose();
+                graphics.pose().translate(x + 5.0f, y + 1.0f, 0.0f);
+                graphics.pose().scale(0.9f, 0.9f, 1.0f);
+                graphics.renderItem(banner.icon(), 0, 0);
+                graphics.pose().popPose();
             }
             // 模组名过长时按剩余宽度截断加省略号，不让文字冲出横幅
+            // 起点跟着图标右移 + 缩小让出的宽度走，避免文字贴到图标上
             String label = banner.label().getString();
-            int textLeft = x + 20;
+            int textLeft = x + 23;
             int textWidth = Math.max(0, right - textLeft - 2);
             if (font.width(label) > textWidth) {
                 label = font.plainSubstrByWidth(label, Math.max(0, textWidth - font.width("..."))) + "...";
             }
             graphics.drawString(font, label, textLeft, y + 5, 0xFF1D2433, false);
         }
+    }
+
+    /**
+     * 配置页里样本槽画的图标是「模组创造标签页图标」，槽里装的却是玩家拖进去的那件物品，
+     * 于是出现「图标是齿轮、提示写升降机滑轮」的错位。
+     * <p>
+     * 这里接管样本槽的 tooltip：改成「模组分类名 + 物品名」，
+     * 第一行对应的就是图标所属的模组，两边就不打架了。
+     */
+    @Inject(method = "renderTooltip", at = @At("HEAD"), cancellable = true)
+    private void sbaddon$classifySampleTooltip(GuiGraphics graphics, int mouseX, int mouseY, CallbackInfo ci) {
+        Slot hovered = ((AbstractContainerScreenAccess) this).sbaddon$getHoveredSlot();
+        if (!(hovered instanceof ClassifyUpgradeContainer.SampleSlot) || hovered.getItem().isEmpty()) {
+            return;
+        }
+        ItemStack stack = hovered.getItem();
+        Component modName = ModNames.displayName(ModNames.namespaceOf(stack));
+        graphics.renderTooltip(Minecraft.getInstance().font,
+                List.of(modName, stack.getHoverName()), Optional.empty(), mouseX, mouseY);
+        ci.cancel();
     }
 
     @Unique
