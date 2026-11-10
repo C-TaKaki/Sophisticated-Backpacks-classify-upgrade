@@ -10,7 +10,6 @@ import net.minecraft.world.inventory.Slot;
 import net.minecraft.world.item.ItemStack;
 import net.p3pp3rf1y.sophisticatedcore.client.gui.StorageScreenBase;
 import net.p3pp3rf1y.sophisticatedcore.client.gui.UpgradeSettingsTab;
-import net.p3pp3rf1y.sophisticatedcore.client.gui.controls.TextBox;
 import net.p3pp3rf1y.sophisticatedcore.client.gui.utils.Dimension;
 import net.p3pp3rf1y.sophisticatedcore.client.gui.utils.GuiHelper;
 import net.p3pp3rf1y.sophisticatedcore.client.gui.utils.Position;
@@ -75,8 +74,13 @@ public class ClassifyTab extends UpgradeSettingsTab<ClassifyUpgradeContainer> {
 
     /** 正在改名的那一行（行索引）；-1 = 没在改名。 */
     private int editingRow = -1;
-    /** 改名输入框：懒创建一次，之后复用（隐藏而不销毁，避免和 Screen 的 children 列表较劲）。 */
-    private RenameBox renameBox;
+    /** 正在编辑的文本（就地编辑，不依赖任何外部输入框控件）。 */
+    private String editingText = "";
+    /** 上一次提交被拒（重名 / 超长）：输入框描边与文字转红。 */
+    private boolean editingError;
+    /** 编辑态下「勾」「叉」的命中区，每帧渲染时写入。 */
+    private int[] renameSaveHit;
+    private int[] renameCancelHit;
 
     /** 上一帧的滚动行，用来识别"滚动发生了"——滚动不播让位动画，内容直接跳到新位置。 */
     private int lastScrollRow;
@@ -323,96 +327,162 @@ public class ClassifyTab extends UpgradeSettingsTab<ClassifyUpgradeContainer> {
         drawList(graphics, mouseX, mouseY, entries);
         drawPinnedRow(graphics, mouseX, mouseY);
         drawScrollbar(graphics, entries.size(), visible);
-        syncRenameBox();
     }
 
-    // ---------------------------------------------------------------- 改名
+    // ---------------------------------------------------------------- 改名（就地编辑）
 
     /**
-     * 改名输入框是懒创建的：挂在 Screen 的 children 上（走它的键盘事件分发），
-     * 关闭编辑时只隐藏不销毁 —— 自己从 Screen 里摘除要走 protected 方法，不值当。
+     * 就地改名：不创建任何输入框控件，输入框由页签自己画在名称位置上，键盘事件由
+     * {@code StorageScreenBaseMixin} 转发进来。
      * <p>
-     * 交互约定：回车保存；点别处 / 按 Esc（都表现为失焦）取消。
+     * 之前用 SB 的 TextBox + Screen#addRenderableWidget 那套，实际点「编辑」没反应 ——
+     * 原因是 SB 屏幕的渲染/焦点流程跟原版 renderables 不是一条路径，输入框画不出来也收不到键。
+     * 现在全部自己接管：点「编辑」→ 按钮消失、名称变输入框、右侧出现勾/叉。
      */
-    private void syncRenameBox() {
-        if (editingRow < 0 || renameBox == null) {
-            return;
-        }
-        if (screen.getFocused() != renameBox) {
-            cancelRename();
-            return;
-        }
-        renameBox.setPosition(new Position(rowX(), Math.round(displayY(editingRow))));
-    }
-
     private void startRename(int row) {
         List<Integer> entries = usedSlots();
         if (row < 0 || row >= entries.size()) {
             return;
         }
         ItemStack sample = getContainer().getSamples().getStackInSlot(entries.get(row));
-        String groupId = ClassifyGroups.groupId(sample);
-        if (groupId == null) {
+        if (ClassifyGroups.groupId(sample) == null) {
             return;
         }
-        if (renameBox == null) {
-            renameBox = new RenameBox(new Position(rowX(), 0), new Dimension(rowWidth(), ROW_FILL_H));
-            renameBox.setMaxLength(ClassifyUpgradeContainer.MAX_NAME_LENGTH);
-            ((com.huanj.sbaddon.mixin.ScreenAccess) screen).sbaddon$addRenderableWidget(renameBox);
-        }
         editingRow = row;
-        // 输入框预填当前显示的名字（含自定义名），玩家想恢复默认就把它清空
-        renameBox.setValue(ClassifyGroups.describe(sample, getContainer().getCustomNames()).label().getString());
-        renameBox.setPosition(new Position(rowX(), Math.round(displayY(row))));
-        renameBox.setVisible(true);
-        screen.setFocused(renameBox);
-        renameBox.setFocused(true);
+        // 预填当前显示名（含已改过的自定义名）
+        editingText = ClassifyGroups.describe(sample, getContainer().getCustomNames()).label().getString();
+        editingError = false;
     }
 
-    /** 回车提交：名字和默认名一致就当作"恢复默认"，把 NBT 里那条记录删掉。 */
+    /**
+     * 提交改名：
+     * <ul>
+     *   <li>空名 / 与默认名一致 → 视为恢复默认，删掉 NBT 记录；</li>
+     *   <li>与其它分类重名（忽略大小写）→ 拒绝，标红并留在编辑态；</li>
+     *   <li>超长 → 截到 {@link ClassifyUpgradeContainer#MAX_NAME_LENGTH} 后照常保存；</li>
+     *   <li>没改动 → 直接退出编辑，不发包。</li>
+     * </ul>
+     */
     private void commitRename() {
-        if (editingRow < 0 || renameBox == null) {
+        if (editingRow < 0) {
             return;
         }
         List<Integer> entries = usedSlots();
-        if (editingRow < entries.size()) {
-            ItemStack sample = getContainer().getSamples().getStackInSlot(entries.get(editingRow));
-            String groupId = ClassifyGroups.groupId(sample);
-            String typed = renameBox.getValue().strip();
-            String defaultLabel = ClassifyGroups.describe(sample, java.util.Map.of()).label().getString();
-            if (typed.equals(defaultLabel)) {
-                typed = "";
-            }
-            if (groupId != null) {
-                String name = typed;
-                getContainer().applyRename(groupId, name);
-                getContainer().sendDataToServer(() -> ClassifyUpgradeContainer.renameTag(groupId, name));
-            }
+        if (editingRow >= entries.size()) {
+            cancelRename();
+            return;
+        }
+        ItemStack sample = getContainer().getSamples().getStackInSlot(entries.get(editingRow));
+        String groupId = ClassifyGroups.groupId(sample);
+        if (groupId == null) {
+            cancelRename();
+            return;
+        }
+        String typed = editingText.strip();
+        if (typed.length() > ClassifyUpgradeContainer.MAX_NAME_LENGTH) {
+            typed = typed.substring(0, ClassifyUpgradeContainer.MAX_NAME_LENGTH);
+        }
+        String defaultLabel = ClassifyGroups.describe(sample, java.util.Map.of()).label().getString();
+        if (typed.equals(defaultLabel)) {
+            typed = "";
+        }
+        if (!typed.isEmpty() && renameCollides(groupId, typed)) {
+            editingText = typed;
+            editingError = true;
+            return;
+        }
+        String current = getContainer().getCustomNames().getOrDefault(groupId, "");
+        String name = typed;
+        if (!current.equals(name)) {
+            getContainer().applyRename(groupId, name);
+            getContainer().sendDataToServer(() -> ClassifyUpgradeContainer.renameTag(groupId, name));
         }
         cancelRename();
     }
 
-    private void cancelRename() {
-        editingRow = -1;
-        if (renameBox != null) {
-            renameBox.setVisible(false);
-            renameBox.setFocused(false);
-            if (screen.getFocused() == renameBox) {
-                screen.setFocused(null);
+    /** 是否与其它分类当前的显示名撞车（忽略大小写、忽略首尾空白）。 */
+    private boolean renameCollides(String selfGroupId, String name) {
+        java.util.Map<String, String> names = getContainer().getCustomNames();
+        for (ItemStack sample : getContainer().getSampleStacks()) {
+            if (sample.isEmpty()) {
+                continue;
+            }
+            String id = ClassifyGroups.groupId(sample);
+            if (id == null || id.equals(selfGroupId)) {
+                continue;
+            }
+            String label = ClassifyGroups.describe(sample, names).label().getString();
+            if (label.equalsIgnoreCase(name)) {
+                return true;
             }
         }
+        return false;
     }
 
-    /** 回车 = 保存。TextBox 的 onEnterPressed 是 protected，只能靠子类接。 */
-    private final class RenameBox extends TextBox {
-        RenameBox(Position position, Dimension dimension) {
-            super(position, dimension);
-        }
+    private void cancelRename() {
+        editingRow = -1;
+        editingText = "";
+        editingError = false;
+        renameSaveHit = null;
+        renameCancelHit = null;
+    }
 
-        @Override
-        protected void onEnterPressed() {
-            commitRename();
+    /**
+     * 键盘入口：由 {@code StorageScreenBaseMixin} 在屏幕的 keyPressed 里转交过来
+     * （页签不是 Screen 的焦点元素，收不到原版的分发）。
+     *
+     * @return true = 事件已消费，屏幕不要再处理（避免一边打字一边触发背包热键）
+     */
+    public boolean handleKeyPressed(int keyCode, int scanCode, int modifiers) {
+        if (editingRow < 0) {
+            return false;
         }
+        switch (keyCode) {
+            case 256 -> cancelRename();                 // Esc = 放弃
+            case 257, 335 -> commitRename();            // Enter / 小键盘 Enter
+            case 259 -> {                               // Backspace
+                if (!editingText.isEmpty()) {
+                    editingText = editingText.substring(0, editingText.length() - 1);
+                    editingError = false;
+                }
+            }
+            case 86 -> {                                // Ctrl+V
+                if ((modifiers & 2) != 0) {
+                    String clip = Minecraft.getInstance().keyboardHandler.getClipboard();
+                    if (clip != null && !clip.isEmpty()) {
+                        appendTyped(clip.replace('\n', ' ').replace('\r', ' '));
+                    }
+                }
+            }
+            default -> {
+                // 编辑态吞掉其它按键（E / Esc 之类不要顺手把背包关掉）
+            }
+        }
+        return true;
+    }
+
+    /** 字符输入入口，同样由 mixin 转发。 */
+    public boolean handleCharTyped(char codePoint, int modifiers) {
+        if (editingRow < 0) {
+            return false;
+        }
+        appendTyped(String.valueOf(codePoint));
+        return true;
+    }
+
+    /** 追加文本并截断到上限；控制字符与「§」直接丢弃（避免染色代码破坏界面）。 */
+    private void appendTyped(String text) {
+        for (int i = 0; i < text.length(); i++) {
+            char c = text.charAt(i);
+            if (c < 32 || c == 167) {
+                continue;
+            }
+            if (editingText.length() >= ClassifyUpgradeContainer.MAX_NAME_LENGTH) {
+                break;
+            }
+            editingText += c;
+        }
+        editingError = false;
     }
 
     /** 条目行。拖动中的那一行最后画，压在其他行上面。 */
@@ -466,6 +536,7 @@ public class ClassifyTab extends UpgradeSettingsTab<ClassifyUpgradeContainer> {
         int editX = deleteX - EDIT_W - 1;
         int nameX = iconX + CELL + 2;
         int nameW = Math.max(0, editX - nameX - 3);
+        boolean editing = entry && r == editingRow;
         String name;
         if (entry) {
             ItemStack sample = getContainer().getSamples().getStackInSlot(slotIndex);
@@ -473,13 +544,14 @@ public class ClassifyTab extends UpgradeSettingsTab<ClassifyUpgradeContainer> {
             ClassifyGroups.Row row = ClassifyGroups.describe(sample, getContainer().getCustomNames());
             ItemStack icon = row.icon().isEmpty() ? sample : row.icon();
             graphics.renderItem(icon, iconX, iconY);
+            if (editing) {
+                // 编辑态：名称位置换成输入框，右侧只留勾/叉，手柄和删除按钮让位
+                drawRenameEditor(graphics, mouseX, mouseY, x, y, w, h);
+                return;
+            }
             name = row.label().getString();
         } else {
             name = Component.translatable("gui.sbaddon.classify.row.empty").getString();
-        }
-        if (entry && r == editingRow) {
-            // 正在改名：输入框盖在这一行上，行文字让位，避免和输入内容叠字
-            name = "";
         }
         graphics.drawString(font, truncate(name, nameW), nameX, y + 5,
                 entry ? COLOR_LABEL : COLOR_LABEL_DIM, false);
@@ -495,6 +567,79 @@ public class ClassifyTab extends UpgradeSettingsTab<ClassifyUpgradeContainer> {
 
         if (entry) {
             rowHits.add(new int[]{r, 1, x, y, w, h, handleX, deleteX, editX});
+        }
+    }
+
+    /**
+     * 就地编辑的一行：深色输入框（描边在非法名时转红）+ 光标 + 右侧勾/叉。
+     * 位置全部照着普通行的名称区域算，视觉上就是"名称变成输入框"。
+     */
+    private void drawRenameEditor(GuiGraphics graphics, int mouseX, int mouseY, int x, int y, int w, int h) {
+        int right = x + w - 3;
+        int cancelX = right - EDIT_W;
+        int saveX = cancelX - EDIT_W - 1;
+        int boxX = rowIconX() + CELL + 1;
+        int boxW = Math.max(12, saveX - 3 - boxX);
+        int boxY = y + 3;
+        int boxH = h - 6;
+
+        graphics.fill(boxX, boxY, boxX + boxW, boxY + boxH, 0xFF1B1B1B);
+        int border = editingError ? 0xFFC06060 : 0xFF7AA0D8;
+        graphics.fill(boxX, boxY, boxX + boxW, boxY + 1, border);
+        graphics.fill(boxX, boxY + boxH - 1, boxX + boxW, boxY + boxH, border);
+        graphics.fill(boxX, boxY, boxX + 1, boxY + boxH, border);
+        graphics.fill(boxX + boxW - 1, boxY, boxX + boxW, boxY + boxH, border);
+        if (editingError) {
+            graphics.fill(boxX + 1, boxY + 1, boxX + boxW - 1, boxY + boxH - 1, 0xFF3A1E1E);
+        }
+
+        int textMax = boxW - 5;
+        String shown = editingText;
+        while (!shown.isEmpty() && font.width(shown) > textMax) {
+            // 超宽时从头部截断，保证正在输入的尾部可见
+            shown = shown.substring(1);
+        }
+        int textColor = editingError ? 0xFFFFA0A0 : 0xFFE8E8E8;
+        graphics.drawString(font, shown, boxX + 2, boxY + 2, textColor, false);
+        if ((System.currentTimeMillis() / 500L) % 2L == 0L) {
+            int cursorX = boxX + 2 + font.width(shown);
+            graphics.fill(cursorX, boxY + 2, cursorX + 1, boxY + boxH - 2, textColor);
+        }
+
+        drawCheck(graphics, saveX, y, h, inside(mouseX, mouseY, saveX, y, EDIT_W, h));
+        drawCross(graphics, cancelX, y, h, inside(mouseX, mouseY, cancelX, y, EDIT_W, h));
+        renameSaveHit = new int[]{saveX, y, EDIT_W, h};
+        renameCancelHit = new int[]{cancelX, y, EDIT_W, h};
+    }
+
+    /** 勾：两段对角线拼出来的对号。 */
+    private void drawCheck(GuiGraphics graphics, int x, int y, int h, boolean hovered) {
+        if (hovered) {
+            graphics.fill(x, y + 2, x + EDIT_W, y + h - 2, 0xFF4F8A4F);
+        }
+        int color = hovered ? 0xFFFFFFFF : 0xFF9BE89B;
+        int cx = x + (EDIT_W - 7) / 2;
+        int cy = y + (h - 7) / 2;
+        for (int i = 0; i < 3; i++) {
+            graphics.fill(cx + 1 + i, cy + 3 + i, cx + 2 + i, cy + 4 + i, color);
+        }
+        for (int i = 0; i < 4; i++) {
+            graphics.fill(cx + 3 + i, cy + 5 - i, cx + 4 + i, cy + 6 - i, color);
+        }
+    }
+
+    /** 叉：和删除按钮同一套画法，只是颜色偏取消。 */
+    private void drawCross(GuiGraphics graphics, int x, int y, int h, boolean hovered) {
+        if (hovered) {
+            graphics.fill(x, y + 2, x + EDIT_W, y + h - 2, 0xFFA34A4A);
+        }
+        int color = hovered ? 0xFFFFFFFF : 0xFFE89B9B;
+        int size = 7;
+        int cx = x + (EDIT_W - size) / 2;
+        int cy = y + (h - size) / 2;
+        for (int i = 0; i < size; i++) {
+            graphics.fill(cx + i, cy + i, cx + i + 1, cy + i + 1, color);
+            graphics.fill(cx + size - 1 - i, cy + i, cx + size - i, cy + i + 1, color);
         }
     }
 
@@ -605,6 +750,20 @@ public class ClassifyTab extends UpgradeSettingsTab<ClassifyUpgradeContainer> {
         }
         if (button != 0) {
             return false;
+        }
+        // 编辑态优先吃点击：勾=保存，叉=放弃，点别处按放弃处理
+        if (editingRow >= 0) {
+            if (renameSaveHit != null
+                    && inside(mouseX, mouseY, renameSaveHit[0], renameSaveHit[1], renameSaveHit[2], renameSaveHit[3])) {
+                commitRename();
+                return true;
+            }
+            if (renameCancelHit != null
+                    && inside(mouseX, mouseY, renameCancelHit[0], renameCancelHit[1], renameCancelHit[2], renameCancelHit[3])) {
+                cancelRename();
+                return true;
+            }
+            cancelRename();
         }
         if (autoButton != null
                 && inside(mouseX, mouseY, autoButton[0], autoButton[1], autoButton[2], autoButton[3])) {

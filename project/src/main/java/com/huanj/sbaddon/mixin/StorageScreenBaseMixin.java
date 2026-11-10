@@ -289,6 +289,30 @@ public abstract class StorageScreenBaseMixin {
         ci.cancel();
     }
 
+    /**
+     * 分类页「就地改名」的键盘入口。
+     * <p>
+     * 页签是普通 Widget，不是 Screen 的焦点控件，SB 也不会把键盘事件派发给页签 ——
+     * 所以在这里（屏幕入口）先问一遍打开的分类页：正在改名就由它接管，屏幕不再处理，
+     * 免得一边打字一边触发 E / Esc 之类的背包热键。
+     */
+    @Inject(method = "keyPressed", at = @At("HEAD"), cancellable = true)
+    private void sbaddon$renameKeyPressed(int keyCode, int scanCode, int modifiers,
+                                          CallbackInfoReturnable<Boolean> cir) {
+        ClassifyTab tab = ClassifyTab.getActiveTab();
+        if (tab != null && tab.handleKeyPressed(keyCode, scanCode, modifiers)) {
+            cir.setReturnValue(true);
+        }
+    }
+
+    @Inject(method = "charTyped", at = @At("HEAD"), cancellable = true)
+    private void sbaddon$renameCharTyped(char codePoint, int modifiers, CallbackInfoReturnable<Boolean> cir) {
+        ClassifyTab tab = ClassifyTab.getActiveTab();
+        if (tab != null && tab.handleCharTyped(codePoint, modifiers)) {
+            cir.setReturnValue(true);
+        }
+    }
+
     @Unique
     private ClassifyUpgradeContainer sbaddon$findContainer(StorageContainerMenuBase<?> menu) {
         for (UpgradeContainerBase<?, ?> container : menu.getUpgradeContainers().values()) {
