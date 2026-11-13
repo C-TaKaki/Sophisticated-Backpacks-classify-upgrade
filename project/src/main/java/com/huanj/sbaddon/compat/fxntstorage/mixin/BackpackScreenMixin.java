@@ -23,6 +23,7 @@ import net.minecraft.core.HolderLookup;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
+import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.inventory.Slot;
 import net.minecraft.world.item.ItemStack;
 import net.neoforged.neoforge.network.PacketDistributor;
@@ -67,6 +68,11 @@ public abstract class BackpackScreenMixin {
     @Unique
     private static final int SBADDON_COLS = 12;
     /** FXNT 物品槽坐标 = 29 + 1（内缩 1px），首行 y = 17 + 1。 */
+    /** 贴图里单元格的左上角（三套尺寸 4/7/9 行都是这个位置，18px 步长可无缝平铺）。 */
+    @Unique
+    private static final int SBADDON_CELL_TEX_U = 29;
+    @Unique
+    private static final int SBADDON_CELL_TEX_V = 17;
     @Unique
     private static final int SBADDON_ORIGIN_X = 30;
     @Unique
@@ -144,6 +150,11 @@ public abstract class BackpackScreenMixin {
     private int sbaddon$maxScroll;
     @Unique
     private boolean sbaddon$applied;
+
+    @Unique
+    private ResourceLocation sbaddon$cellTexture;
+    @Unique
+    private String sbaddon$cellTextureSuffix = "";
 
     @Unique
     private FxntClassifyData.Snapshot sbaddon$snapshot = FxntClassifyData.Snapshot.empty();
@@ -362,8 +373,8 @@ public abstract class BackpackScreenMixin {
         graphics.fill(areaX, areaY, areaX + SBADDON_COLS * SBADDON_CELL,
                 areaY + rows * SBADDON_CELL, SBADDON_COLOR_SLOT);
 
-        // 2) 按新布局逐格补边框（只在邻居格不存在时画，避免相邻格出现 2px 粗线）
-        sbaddon$drawCellBorders(graphics, left, top);
+        // 2) 逐格贴 FXNT 自己的单元格贴图（18×18，18px 步长无缝），视觉与未开分类时一致
+        sbaddon$blitCells(graphics, left, top);
 
         // 3) 整行分类横幅
         sbaddon$drawBanners(graphics, left, top);
@@ -372,35 +383,36 @@ public abstract class BackpackScreenMixin {
         sbaddon$drawPanel(graphics, mouseX, mouseY);
     }
 
+    /**
+     * 逐格平铺 FXNT 的单元格贴图。
+     * <p>
+     * 之前是「平色铺底 + 只画块外框」，因为内部格子的四邻都存在，一条线都不画 —— 结果一片纯灰。
+     * 直接贴原生 18×18 格子：边框、内凹高光全部由贴图给出，和没开分类时一模一样。
+     */
     @Unique
-    private void sbaddon$drawCellBorders(GuiGraphics graphics, int left, int top) {
-        Set<Long> cells = new HashSet<>();
-        for (ClassifyLayout.Placement placement : sbaddon$placements) {
-            cells.add(sbaddon$cellKey(placement.x(), placement.y()));
+    private void sbaddon$blitCells(GuiGraphics graphics, int left, int top) {
+        if (sbaddon$placements.isEmpty()) {
+            return;
         }
+        ResourceLocation texture = sbaddon$cellTexture();
         for (ClassifyLayout.Placement placement : sbaddon$placements) {
-            int x = left + placement.x();
-            int y = top + placement.y();
-            if (!cells.contains(sbaddon$cellKey(placement.x(), placement.y() - SBADDON_CELL))) {
-                graphics.fill(x, y, x + SBADDON_CELL, y + 1, SBADDON_COLOR_BORDER);
-            }
-            if (!cells.contains(sbaddon$cellKey(placement.x(), placement.y() + SBADDON_CELL))) {
-                graphics.fill(x, y + SBADDON_CELL - 1, x + SBADDON_CELL, y + SBADDON_CELL,
-                        SBADDON_COLOR_BORDER);
-            }
-            if (!cells.contains(sbaddon$cellKey(placement.x() - SBADDON_CELL, placement.y()))) {
-                graphics.fill(x, y, x + 1, y + SBADDON_CELL, SBADDON_COLOR_BORDER);
-            }
-            if (!cells.contains(sbaddon$cellKey(placement.x() + SBADDON_CELL, placement.y()))) {
-                graphics.fill(x + SBADDON_CELL - 1, y, x + SBADDON_CELL, y + SBADDON_CELL,
-                        SBADDON_COLOR_BORDER);
-            }
+            // placement 是「物品」坐标，贴图格子比它左上各多 1px
+            graphics.blit(texture, left + placement.x() - 1, top + placement.y() - 1,
+                    SBADDON_CELL_TEX_U, SBADDON_CELL_TEX_V, SBADDON_CELL, SBADDON_CELL);
         }
     }
 
+    /** 单元格贴图随可见行数换套（4 / 7 / 9 行），三套的格子原点与步长都一样。 */
     @Unique
-    private static long sbaddon$cellKey(int x, int y) {
-        return ((long) (x / SBADDON_CELL) << 32) ^ (y / SBADDON_CELL);
+    private ResourceLocation sbaddon$cellTexture() {
+        int rows = Math.max(1, containerRows);
+        String suffix = rows <= 4 ? "4" : rows <= 7 ? "7" : "9";
+        if (sbaddon$cellTexture == null || !sbaddon$cellTextureSuffix.equals(suffix)) {
+            sbaddon$cellTexture = ResourceLocation.fromNamespaceAndPath("fxntstorage",
+                    "textures/gui/container/backpack_screen_" + suffix + ".png");
+            sbaddon$cellTextureSuffix = suffix;
+        }
+        return sbaddon$cellTexture;
     }
 
     @Unique
