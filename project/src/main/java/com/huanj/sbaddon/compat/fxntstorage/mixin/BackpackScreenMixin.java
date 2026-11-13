@@ -184,6 +184,19 @@ public abstract class BackpackScreenMixin {
     private final Map<String, Float> sbaddon$rowY = new HashMap<>();
     @Unique
     private int sbaddon$lastPanelScroll;
+    /**
+     * 松手后「等服务端确认」的那一条：冻结它的 y，别让它滑回旧槽位。
+     * <p>
+     * 松手到新顺序同步回来之间有几帧，列表仍是旧顺序 —— 这时它的目标位置又变回原槽位，
+     * 插值会把它拽回去，等新顺序到了再滑过来，看起来就是"重播了一遍动画"。
+     * 所以这段真空期里把这条钉在松手位置，等服务端确认后再放开。
+     */
+    @Unique
+    private String sbaddon$settleKey;
+    @Unique
+    private int sbaddon$settleIndex = -1;
+    @Unique
+    private float sbaddon$settleY;
 
     /** 行位置缓存的 key：优先分组 id（一条样本一个分组），退化时用行号占位。 */
     @Unique
@@ -467,6 +480,24 @@ public abstract class BackpackScreenMixin {
             sbaddon$lastPanelScroll = sbaddon$panelScroll;
         }
         int total = samples.size();
+        // 服务端已经把这条件放到目标槽位了 → 解除冻结，让它从松手位置滑过去（这一段很短）
+        if (sbaddon$settleKey != null) {
+            boolean applied = sbaddon$settleIndex >= 0 && sbaddon$settleIndex < total
+                    && sbaddon$settleKey.equals(sbaddon$rowKey(samples.get(sbaddon$settleIndex),
+                    sbaddon$settleIndex));
+            boolean gone = true;
+            for (int r = 0; r < total; r++) {
+                if (sbaddon$settleKey.equals(sbaddon$rowKey(samples.get(r), r))) {
+                    gone = false;
+                    break;
+                }
+            }
+            if (applied || gone) {
+                sbaddon$settleKey = null;
+                sbaddon$settleIndex = -1;
+            }
+        }
+
         int last = Math.min(total, sbaddon$panelScroll + SBADDON_ROWS_VISIBLE);
 
         // 只保留仍存在且可见的记录：删掉的条目不会在缓存里留垃圾
@@ -476,6 +507,10 @@ public abstract class BackpackScreenMixin {
         }
         if (sbaddon$dragRow >= 0 && sbaddon$dragRow < total) {
             alive.add(sbaddon$rowKey(samples.get(sbaddon$dragRow), sbaddon$dragRow));
+        }
+        if (sbaddon$settleKey != null) {
+            // 冻结中的那条可能暂时不在可见区（滚动过），别把它的位置丢了
+            alive.add(sbaddon$settleKey);
         }
         sbaddon$rowY.keySet().retainAll(alive);
 
@@ -494,6 +529,11 @@ public abstract class BackpackScreenMixin {
     @Unique
     private void sbaddon$stepTo(int r, ItemStack sample) {
         String key = sbaddon$rowKey(sample, r);
+        if (sbaddon$settleKey != null && sbaddon$settleKey.equals(key)) {
+            // 等服务端确认期间：钉在松手位置，不参与插值，免得先滑回旧槽位
+            sbaddon$rowY.put(key, sbaddon$settleY);
+            return;
+        }
         float target = sbaddon$targetY(r);
         Float current = sbaddon$rowY.get(key);
         if (current == null || sbaddon$dragRow == r) {
@@ -954,16 +994,24 @@ public abstract class BackpackScreenMixin {
         sbaddon$dragTarget = Math.min(Math.max(row, 0), total - 1);
     }
 
-    /** 结束拖拽：落点和起点不同就提交新顺序。 */
+    /** 结束拖拽：落点和起点不同就提交新顺序，并把这条钉在松手位置等服务端确认。 */
     @Unique
     private void sbaddon$finishDrag() {
         int from = sbaddon$dragRow;
         int to = sbaddon$dragTarget;
         sbaddon$dragRow = -1;
         sbaddon$dragTarget = -1;
-        if (from >= 0 && to >= 0 && from != to) {
-            sbaddon$send(FxntClassifyAction.reorder(from, to));
+        if (from < 0 || to < 0 || from == to) {
+            return;
         }
+        List<ItemStack> samples = sbaddon$snapshot.samples();
+        if (from < samples.size()) {
+            ItemStack moved = samples.get(from);
+            sbaddon$settleKey = sbaddon$rowKey(moved, from);
+            sbaddon$settleIndex = to;
+            sbaddon$settleY = sbaddon$displayY(from, moved);
+        }
+        sbaddon$send(FxntClassifyAction.reorder(from, to));
     }
 
     @Inject(method = "mouseReleased", at = @At("HEAD"), cancellable = true)
@@ -1112,6 +1160,8 @@ public abstract class BackpackScreenMixin {
 
     @Unique
     private void sbaddon$cancelDrag() {
+        sbaddon$settleKey = null;
+        sbaddon$settleIndex = -1;
         if (sbaddon$dragRow < 0) {
             return;
         }
