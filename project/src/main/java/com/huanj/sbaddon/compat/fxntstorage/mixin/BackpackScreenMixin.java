@@ -185,18 +185,39 @@ public abstract class BackpackScreenMixin {
     @Unique
     private int sbaddon$lastPanelScroll;
     /**
-     * 松手后「等服务端确认」的那一条：冻结它的 y，别让它滑回旧槽位。
+     * 客户端临时顺序：拖拽/增删后立刻生效，服务端回包只当确认。
      * <p>
-     * 松手到新顺序同步回来之间有几帧，列表仍是旧顺序 —— 这时它的目标位置又变回原槽位，
-     * 插值会把它拽回去，等新顺序到了再滑过来，看起来就是"重播了一遍动画"。
-     * 所以这段真空期里把这条钉在松手位置，等服务端确认后再放开。
+     * 精妙背包那边 {@code applyOrder} 是本地立即改数据，所以松手瞬间就到位、没有空窗；
+     * 我们这边的数据在服务端的物品 NBT 里，往返期间列表还是旧顺序 ——
+     * 旧顺序会让被拖条目的目标位置变回原槽位，于是"滑回去再滑过来"。
+     * 用这份覆盖抹平空窗：服务端顺序对上后自动丢弃。
      */
     @Unique
-    private String sbaddon$settleKey;
+    private List<ItemStack> sbaddon$localOrder;
+
+    /** 当前应当渲染/交互的样本顺序。 */
     @Unique
-    private int sbaddon$settleIndex = -1;
+    private List<ItemStack> sbaddon$samples() {
+        return sbaddon$localOrder != null ? sbaddon$localOrder : sbaddon$snapshot.samples();
+    }
+
+    /** 服务端顺序已经和本地覆盖一致 → 丢掉覆盖，回到权威数据。 */
     @Unique
-    private float sbaddon$settleY;
+    private void sbaddon$syncLocalOrder() {
+        if (sbaddon$localOrder == null) {
+            return;
+        }
+        List<ItemStack> server = sbaddon$snapshot.samples();
+        if (server.size() != sbaddon$localOrder.size()) {
+            return;
+        }
+        for (int i = 0; i < server.size(); i++) {
+            if (!sbaddon$rowKey(server.get(i), i).equals(sbaddon$rowKey(sbaddon$localOrder.get(i), i))) {
+                return;
+            }
+        }
+        sbaddon$localOrder = null;
+    }
 
     /** 行位置缓存的 key：优先分组 id（一条样本一个分组），退化时用行号占位。 */
     @Unique
@@ -239,6 +260,7 @@ public abstract class BackpackScreenMixin {
                 sbaddon$applied = false;
                 sbaddon$scroll = 0;
                 sbaddon$panelOpen = false;
+                sbaddon$localOrder = null;
                 sbaddon$stopEditing(false);
                 sbaddon$cancelDrag();
                 sbaddon$restoreVanillaSlots(menu);
@@ -250,7 +272,7 @@ public abstract class BackpackScreenMixin {
         HolderLookup.Provider registries = sbaddon$registries();
         sbaddon$snapshot = FxntClassifySource.snapshot(upgradeSlot.getItem(), registries);
 
-        ClassifySource source = new FxntClassifySource(menu, sbaddon$snapshot.samples(),
+        ClassifySource source = new FxntClassifySource(menu, sbaddon$samples(),
                 sbaddon$snapshot.names());
         ClassifyLayout.Result result = ClassifyLayout.compute(
                 source, SBADDON_COLS, rows, sbaddon$scroll, null, SBADDON_ORIGIN_X, SBADDON_ORIGIN_Y);
@@ -306,7 +328,7 @@ public abstract class BackpackScreenMixin {
     /** 面板列表一屏装不下时，滚动位置要跟着条目数收敛。 */
     @Unique
     private void sbaddon$clampPanelScroll() {
-        int max = Math.max(0, sbaddon$snapshot.samples().size() - SBADDON_ROWS_VISIBLE);
+        int max = Math.max(0, sbaddon$samples().size() - SBADDON_ROWS_VISIBLE);
         if (sbaddon$panelScroll > max) {
             sbaddon$panelScroll = max;
         }
@@ -480,24 +502,6 @@ public abstract class BackpackScreenMixin {
             sbaddon$lastPanelScroll = sbaddon$panelScroll;
         }
         int total = samples.size();
-        // 服务端已经把这条件放到目标槽位了 → 解除冻结，让它从松手位置滑过去（这一段很短）
-        if (sbaddon$settleKey != null) {
-            boolean applied = sbaddon$settleIndex >= 0 && sbaddon$settleIndex < total
-                    && sbaddon$settleKey.equals(sbaddon$rowKey(samples.get(sbaddon$settleIndex),
-                    sbaddon$settleIndex));
-            boolean gone = true;
-            for (int r = 0; r < total; r++) {
-                if (sbaddon$settleKey.equals(sbaddon$rowKey(samples.get(r), r))) {
-                    gone = false;
-                    break;
-                }
-            }
-            if (applied || gone) {
-                sbaddon$settleKey = null;
-                sbaddon$settleIndex = -1;
-            }
-        }
-
         int last = Math.min(total, sbaddon$panelScroll + SBADDON_ROWS_VISIBLE);
 
         // 只保留仍存在且可见的记录：删掉的条目不会在缓存里留垃圾
@@ -507,10 +511,6 @@ public abstract class BackpackScreenMixin {
         }
         if (sbaddon$dragRow >= 0 && sbaddon$dragRow < total) {
             alive.add(sbaddon$rowKey(samples.get(sbaddon$dragRow), sbaddon$dragRow));
-        }
-        if (sbaddon$settleKey != null) {
-            // 冻结中的那条可能暂时不在可见区（滚动过），别把它的位置丢了
-            alive.add(sbaddon$settleKey);
         }
         sbaddon$rowY.keySet().retainAll(alive);
 
@@ -529,11 +529,6 @@ public abstract class BackpackScreenMixin {
     @Unique
     private void sbaddon$stepTo(int r, ItemStack sample) {
         String key = sbaddon$rowKey(sample, r);
-        if (sbaddon$settleKey != null && sbaddon$settleKey.equals(key)) {
-            // 等服务端确认期间：钉在松手位置，不参与插值，免得先滑回旧槽位
-            sbaddon$rowY.put(key, sbaddon$settleY);
-            return;
-        }
         float target = sbaddon$targetY(r);
         Float current = sbaddon$rowY.get(key);
         if (current == null || sbaddon$dragRow == r) {
@@ -586,7 +581,9 @@ public abstract class BackpackScreenMixin {
         graphics.drawString(font, Component.translatable("gui.sbaddon.classify.title"),
                 iconX + SBADDON_CELL + 2, panelTop + 6, SBADDON_COLOR_TEXT, false);
 
-        List<ItemStack> samples = sbaddon$snapshot.samples();
+        // 服务端顺序一旦与本地覆盖一致就丢掉覆盖，回到权威数据
+        sbaddon$syncLocalOrder();
+        List<ItemStack> samples = sbaddon$samples();
         // 拖拽状态每帧按鼠标位置推进（不依赖 mouseDragged 注入），让位动画才有数据可插值
         sbaddon$tickDrag(mouseY);
         sbaddon$clampPanelScroll();
@@ -918,8 +915,13 @@ public abstract class BackpackScreenMixin {
                 return;
             }
             if (sbaddon$inside(mouseX, mouseY, hit[6], hit[2], SBADDON_DELETE_W, hit[4])) {
+                // 本地先删，服务端回包只作确认（否则收起那一行会有 1-2 帧的错位）
+                List<ItemStack> base = new ArrayList<>(sbaddon$samples());
+                if (hit[0] >= 0 && hit[0] < base.size()) {
+                    base.remove(hit[0]);
+                    sbaddon$localOrder = base;
+                }
                 sbaddon$send(FxntClassifyAction.remove(hit[0]));
-                // 不清缓存：位置是按分组 id 记的，删掉一条后其余条目自己滑上来
                 sbaddon$clampPanelScroll();
                 return;
             }
@@ -971,7 +973,7 @@ public abstract class BackpackScreenMixin {
         if (sbaddon$dragRow < 0) {
             return;
         }
-        int total = sbaddon$snapshot.samples().size();
+        int total = sbaddon$samples().size();
         if (total <= 0) {
             sbaddon$finishDrag();
             return;
@@ -994,7 +996,7 @@ public abstract class BackpackScreenMixin {
         sbaddon$dragTarget = Math.min(Math.max(row, 0), total - 1);
     }
 
-    /** 结束拖拽：落点和起点不同就提交新顺序，并把这条钉在松手位置等服务端确认。 */
+    /** 结束拖拽：本地立刻应用新顺序（无空窗），再发服务端确认。 */
     @Unique
     private void sbaddon$finishDrag() {
         int from = sbaddon$dragRow;
@@ -1004,13 +1006,14 @@ public abstract class BackpackScreenMixin {
         if (from < 0 || to < 0 || from == to) {
             return;
         }
-        List<ItemStack> samples = sbaddon$snapshot.samples();
-        if (from < samples.size()) {
-            ItemStack moved = samples.get(from);
-            sbaddon$settleKey = sbaddon$rowKey(moved, from);
-            sbaddon$settleIndex = to;
-            sbaddon$settleY = sbaddon$displayY(from, moved);
+        List<ItemStack> base = new ArrayList<>(sbaddon$samples());
+        if (from >= base.size() || to >= base.size()) {
+            return;
         }
+        ItemStack moved = base.remove(from);
+        base.add(to, moved);
+        // 和精妙背包的 applyOrder 等价：本地立即生效，服务端回包只是确认
+        sbaddon$localOrder = base;
         sbaddon$send(FxntClassifyAction.reorder(from, to));
     }
 
@@ -1098,7 +1101,7 @@ public abstract class BackpackScreenMixin {
     @Unique
     private void sbaddon$startRename(int row) {
         sbaddon$stopEditing(false);
-        List<ItemStack> samples = sbaddon$snapshot.samples();
+        List<ItemStack> samples = sbaddon$samples();
         if (row < 0 || row >= samples.size()) {
             return;
         }
@@ -1147,7 +1150,7 @@ public abstract class BackpackScreenMixin {
         if (!commit || box == null || row < 0) {
             return;
         }
-        List<ItemStack> samples = sbaddon$snapshot.samples();
+        List<ItemStack> samples = sbaddon$samples();
         if (row >= samples.size()) {
             return;
         }
@@ -1160,8 +1163,6 @@ public abstract class BackpackScreenMixin {
 
     @Unique
     private void sbaddon$cancelDrag() {
-        sbaddon$settleKey = null;
-        sbaddon$settleIndex = -1;
         if (sbaddon$dragRow < 0) {
             return;
         }
