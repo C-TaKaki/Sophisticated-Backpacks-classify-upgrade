@@ -1069,9 +1069,6 @@ public abstract class BackpackScreenMixin {
         // 不能用 setReturnValue(true)：那会掐断方法体，把 super 一起吞掉。
         // 分类视图的槽位坐标每帧由我们重算，宿主自己滚一格不影响画面。
         if (Screen.hasShiftDown()) {
-            // 记住宿主当前的滚动行：放权让它自己处理完（super 里才会发出
-            // MouseScrolled.Post，鼠标手势那类模组靠这个事件），返回时再还原，
-            // 效果等于"背包没滚动，但滚轮事件交给了别人"。
             sbaddon$savedTopRow = topVisibleRow;
             sbaddon$scrollGuard = true;
             return;
