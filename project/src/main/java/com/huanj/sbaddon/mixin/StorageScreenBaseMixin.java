@@ -16,6 +16,7 @@ import net.minecraft.world.inventory.AbstractContainerMenu;
 import net.minecraft.world.inventory.Slot;
 import net.minecraft.world.item.ItemStack;
 import net.p3pp3rf1y.sophisticatedcore.client.gui.StorageScreenBase;
+import net.p3pp3rf1y.sophisticatedcore.client.gui.controls.InventoryScrollPanel;
 import net.p3pp3rf1y.sophisticatedcore.common.gui.StorageContainerMenuBase;
 import net.p3pp3rf1y.sophisticatedcore.common.gui.UpgradeContainerBase;
 import org.spongepowered.asm.mixin.Mixin;
@@ -68,6 +69,9 @@ public abstract class StorageScreenBaseMixin {
     /** 上一帧是否真的套用过分类布局（用来判断需不需要把槽位还给 SB）。 */
     @Unique
     private boolean sbaddon$layoutApplied;
+    /** 本次滚轮是否临时打开了「只允许拖滚动条」限制，需要在方法返回时复原。 */
+    @Unique
+    private boolean sbaddon$restoredScrollRestrict;
 
     /** SB 自己的槽位排版：分类关掉/升级被拿掉时靠它把槽位摆回原样。 */
     @Shadow
@@ -202,10 +206,16 @@ public abstract class StorageScreenBaseMixin {
             cir.setReturnValue(true);
             return;
         }
-        // 按住 Shift 时暂停背包上下滚动（分类页签里的列表不受影响，上面已经先处理掉了）。
-        // 放在 maxScroll 判断之前：普通视图的滚动也要一起停掉。
+        // 按住 Shift 时**不消费**这次滚轮：直接返回，让原方法继续往下走。
+        // 关键是不能 setReturnValue(true) —— 那会掐断方法体，连带跳过 super.mouseScrolled，
+        // 而 NeoForge 的 ScreenEvent.MouseScrolled.Post 是在 super 里发的（鼠标手势等模组
+        // 靠它做 Shift+滚轮 ±1）。分类视图里槽位坐标由我们每帧根据 sbaddon$scroll 重算，
+        // 宿主自己滚一格不会反映到画面上，所以"放权"和"不滚动"在这里可以共存。
         if (Screen.hasShiftDown()) {
-            cir.setReturnValue(true);
+            // 让 SB 的滚动面板忽略这次滚轮（restrict = 只有鼠标压在滚动条上才允许滚），
+            // 这样事件仍然沿 super 传下去给别的模组，但背包内容不会动。
+            InventoryScrollPanel.setRestrictScrollToScrollbar(true);
+            sbaddon$restoredScrollRestrict = true;
             return;
         }
         if (sbaddon$maxScroll <= 0) {
@@ -214,6 +224,16 @@ public abstract class StorageScreenBaseMixin {
         int delta = scrollY > 0 ? -1 : 1;
         sbaddon$scroll = Math.max(0, Math.min(sbaddon$maxScroll, sbaddon$scroll + delta));
         cir.setReturnValue(true);
+    }
+
+    /** 本次滚轮临时加的限制用完即撤，别影响后续正常滚动。 */
+    @Inject(method = "mouseScrolled", at = @At("RETURN"))
+    private void sbaddon$afterScroll(double mouseX, double mouseY, double scrollX, double scrollY,
+                                     CallbackInfoReturnable<Boolean> cir) {
+        if (sbaddon$restoredScrollRestrict) {
+            InventoryScrollPanel.setRestrictScrollToScrollbar(false);
+            sbaddon$restoredScrollRestrict = false;
+        }
     }
 
     /**

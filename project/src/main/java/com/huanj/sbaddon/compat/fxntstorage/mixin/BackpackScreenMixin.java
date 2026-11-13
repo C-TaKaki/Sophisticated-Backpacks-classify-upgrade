@@ -185,6 +185,11 @@ public abstract class BackpackScreenMixin {
     private final Map<String, Float> sbaddon$rowY = new HashMap<>();
     @Unique
     private int sbaddon$lastPanelScroll;
+    /** Shift 放权期间宿主滚动行的快照，方法返回时还原。 */
+    @Unique
+    private int sbaddon$savedTopRow;
+    @Unique
+    private boolean sbaddon$scrollGuard;
     /**
      * 客户端临时顺序：拖拽/增删后立刻生效，服务端回包只当确认。
      * <p>
@@ -1032,10 +1037,7 @@ public abstract class BackpackScreenMixin {
     private void sbaddon$onScroll(double mouseX, double mouseY, double scrollX, double scrollY,
                                   CallbackInfoReturnable<Boolean> cir) {
         if (!sbaddon$applied) {
-            // 没装分类升级也要生效：按住 Shift 就暂停背包上下滚动
-            if (Screen.hasShiftDown()) {
-                cir.setReturnValue(true);
-            }
+            // 没装分类升级：Shift 也一律放权，不消费滚轮（让鼠标手势等模组正常收到事件）
             return;
         }
         int delta = scrollY > 0 ? -1 : 1;
@@ -1062,10 +1064,16 @@ public abstract class BackpackScreenMixin {
         }
 
         BackpackScreen self = sbaddon$self();
-        // 按住 Shift 时暂停背包上下滚动（分类面板里那个列表不受影响，上面已经先处理掉了）。
-        // 这里同时吃掉 FXNT 自己那一套按行号的滚动，否则它还会滚。
+        // 按住 Shift 时**不消费**滚轮：直接返回让原方法继续（它内部会调 super，从而触发
+        // NeoForge 的 MouseScrolled.Post —— 鼠标手势那类模组就是靠它做 Shift+滚轮 ±1）。
+        // 不能用 setReturnValue(true)：那会掐断方法体，把 super 一起吞掉。
+        // 分类视图的槽位坐标每帧由我们重算，宿主自己滚一格不影响画面。
         if (Screen.hasShiftDown()) {
-            cir.setReturnValue(true);
+            // 记住宿主当前的滚动行：放权让它自己处理完（super 里才会发出
+            // MouseScrolled.Post，鼠标手势那类模组靠这个事件），返回时再还原，
+            // 效果等于"背包没滚动，但滚轮事件交给了别人"。
+            sbaddon$savedTopRow = topVisibleRow;
+            sbaddon$scrollGuard = true;
             return;
         }
         if (sbaddon$maxScroll > 0 && sbaddon$inside(mouseX, mouseY,
@@ -1074,6 +1082,17 @@ public abstract class BackpackScreenMixin {
             sbaddon$scroll = Math.max(0, Math.min(sbaddon$maxScroll, sbaddon$scroll + delta));
             cir.setReturnValue(true);
         }
+    }
+
+    /** Shift 放权的那一次滚轮：把宿主滚动行还原回去（分类布局每帧重排槽位，不需要额外同步）。 */
+    @Inject(method = "mouseScrolled", at = @At("RETURN"))
+    private void sbaddon$afterScroll(double mouseX, double mouseY, double scrollX, double scrollY,
+                                     CallbackInfoReturnable<Boolean> cir) {
+        if (!sbaddon$scrollGuard) {
+            return;
+        }
+        sbaddon$scrollGuard = false;
+        topVisibleRow = sbaddon$savedTopRow;
     }
 
     @Inject(method = "renderScrollbar", at = @At("HEAD"), cancellable = true)
