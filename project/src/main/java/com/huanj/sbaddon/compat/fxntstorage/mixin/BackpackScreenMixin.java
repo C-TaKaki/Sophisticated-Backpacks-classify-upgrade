@@ -922,17 +922,13 @@ public abstract class BackpackScreenMixin {
     /**
      * 拖拽状态的每帧推进：拿鼠标当前 y 更新「跟手位置」和「落点行」。
      * <p>
-     * 不依赖 {@code mouseDragged} 注入（那是快路径），渲染循环本身每帧都有鼠标坐标，
-     * 这样即使拖拽事件在某些路径下没派发到本界面，排序和让位动画照样成立。
-     * 同时用左键的物理状态兜底判定松手，避免拖拽状态卡死。
+     * 只做位置推进，**不在这里判断松手** —— {@code MouseHandler.isLeftPressed} 只在
+     * 没有打开任何界面时才会更新（开着 GUI 时它一直是 false），拿它判松手会把拖拽每帧打死。
+     * 松手统一由 {@code mouseReleased} 收尾。
      */
     @Unique
     private void sbaddon$tickDrag(double mouseY) {
         if (sbaddon$dragRow < 0) {
-            return;
-        }
-        if (!Minecraft.getInstance().mouseHandler.isLeftPressed()) {
-            sbaddon$finishDrag();
             return;
         }
         int total = sbaddon$snapshot.samples().size();
