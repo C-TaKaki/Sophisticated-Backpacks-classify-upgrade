@@ -821,17 +821,18 @@ public abstract class BackpackScreenMixin {
         }
 
         for (int[] hit : sbaddon$rowHits) {
-            if (sbaddon$inside(mouseX, mouseY, hit[8], hit[3], SBADDON_EDIT_W, hit[5])) {
+            // 布局：{行号, x, y, w, h, 手柄x, 删除x, 改名x}
+            if (sbaddon$inside(mouseX, mouseY, hit[7], hit[3], SBADDON_EDIT_W, hit[4])) {
                 sbaddon$startRename(hit[0]);
                 return;
             }
-            if (sbaddon$inside(mouseX, mouseY, hit[7], hit[3], SBADDON_DELETE_W, hit[5])) {
+            if (sbaddon$inside(mouseX, mouseY, hit[6], hit[3], SBADDON_DELETE_W, hit[4])) {
                 sbaddon$send(FxntClassifyAction.remove(hit[0]));
                 sbaddon$rowY.clear();
                 sbaddon$clampPanelScroll();
                 return;
             }
-            if (sbaddon$inside(mouseX, mouseY, hit[6], hit[3], SBADDON_HANDLE_W, hit[5])) {
+            if (sbaddon$inside(mouseX, mouseY, hit[5], hit[3], SBADDON_HANDLE_W, hit[4])) {
                 sbaddon$dragRow = hit[0];
                 sbaddon$dragTarget = hit[0];
                 sbaddon$dragMouseY = mouseY;
