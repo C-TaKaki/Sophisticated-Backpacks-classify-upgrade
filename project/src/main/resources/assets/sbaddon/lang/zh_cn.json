@@ -12,5 +12,16 @@
   "gui.sbaddon.classify.fallback": "默认分类",
   "gui.sbaddon.classify.vanilla": "原版",
   "gui.sbaddon.classify.row.empty": "拖入物品添加",
-  "gui.sbaddon.classify.auto": "一键分类"
+  "gui.sbaddon.classify.auto": "一键分类",
+  "gui.sbaddon.toggle.expand": "展开",
+  "gui.sbaddon.toggle.collapse": "收起",
+  "key.categories.sbaddon": "精妙背包附属",
+  "key.sbaddon.toggle_demo": "打开展开/收起按钮演示",
+  "screen.sbaddon.toggle_demo.title": "展开 / 收起 切换按钮",
+  "screen.sbaddon.toggle_demo.panel_title": "面板内容",
+  "screen.sbaddon.toggle_demo.line1": "宽度跟随按钮进度",
+  "screen.sbaddon.toggle_demo.line2": "透明度同步淡入",
+  "screen.sbaddon.toggle_demo.state_expanded": "当前状态：展开 ▼",
+  "screen.sbaddon.toggle_demo.state_collapsed": "当前状态：收起 ▶",
+  "screen.sbaddon.toggle_demo.hint": "点按钮切换 · ESC 关闭"
 }
