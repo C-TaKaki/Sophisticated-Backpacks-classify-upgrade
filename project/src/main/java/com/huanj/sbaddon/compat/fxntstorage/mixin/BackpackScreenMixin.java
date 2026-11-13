@@ -104,6 +104,9 @@ public abstract class BackpackScreenMixin {
     private static final int SBADDON_AUTO_W = 44;
     @Unique
     private static final int SBADDON_AUTO_H = 12;
+    /** 改名输入框内文字相对边框的内缩（也是 EditBox 控件矩形相对边框的偏移）。 */
+    @Unique
+    private static final int SBADDON_TEXT_INSET = 4;
 
     @Unique
     private static final int SBADDON_COLOR_PANEL = 0xFFC6C6C6;
@@ -170,10 +173,24 @@ public abstract class BackpackScreenMixin {
     private int sbaddon$dragTarget = -1;
     @Unique
     private double sbaddon$dragMouseY;
+    /**
+     * 行的显示 y，**按分组 id 记录**而不是按行号。
+     * <p>
+     * 行号会随排序/删除变化，服务端回包那一刻「第 3 行」可能换成了别的条目 —— 用行号当 key
+     * 会让所有行错位跳一下（这就是之前"重排后闪跳"的来源）。分组 id 跟着条目走，
+     * 重排后每条自己滑到新槽位，中间不会闪。
+     */
     @Unique
-    private final Map<Integer, Float> sbaddon$rowY = new HashMap<>();
+    private final Map<String, Float> sbaddon$rowY = new HashMap<>();
     @Unique
     private int sbaddon$lastPanelScroll;
+
+    /** 行位置缓存的 key：优先分组 id（一条样本一个分组），退化时用行号占位。 */
+    @Unique
+    private static String sbaddon$rowKey(ItemStack sample, int index) {
+        String id = sample == null || sample.isEmpty() ? null : ClassifyGroups.groupId(sample);
+        return id != null ? id : "idx:" + index;
+    }
 
     // ---------------------------------------------------------------- 影子成员
 
@@ -443,19 +460,30 @@ public abstract class BackpackScreenMixin {
 
     /** 每帧刷新一次所有可见行的显示位置。 */
     @Unique
-    private void sbaddon$updateRowPositions(int total) {
+    private void sbaddon$updateRowPositions(List<ItemStack> samples) {
         if (sbaddon$lastPanelScroll != sbaddon$panelScroll) {
             // 滚动时内容整列平移，插值会变成"从上往下滑"的补偿动画 —— 直接丢掉缓存
             sbaddon$rowY.clear();
             sbaddon$lastPanelScroll = sbaddon$panelScroll;
         }
-        sbaddon$rowY.keySet().removeIf(r -> r >= total);
+        int total = samples.size();
         int last = Math.min(total, sbaddon$panelScroll + SBADDON_ROWS_VISIBLE);
+
+        // 只保留仍存在且可见的记录：删掉的条目不会在缓存里留垃圾
+        Set<String> alive = new HashSet<>();
         for (int r = sbaddon$panelScroll; r < last; r++) {
-            sbaddon$stepTo(r);
+            alive.add(sbaddon$rowKey(samples.get(r), r));
         }
-        if (sbaddon$dragRow >= 0) {
-            sbaddon$stepTo(sbaddon$dragRow);
+        if (sbaddon$dragRow >= 0 && sbaddon$dragRow < total) {
+            alive.add(sbaddon$rowKey(samples.get(sbaddon$dragRow), sbaddon$dragRow));
+        }
+        sbaddon$rowY.keySet().retainAll(alive);
+
+        for (int r = sbaddon$panelScroll; r < last; r++) {
+            sbaddon$stepTo(r, samples.get(r));
+        }
+        if (sbaddon$dragRow >= 0 && sbaddon$dragRow < total) {
+            sbaddon$stepTo(sbaddon$dragRow, samples.get(sbaddon$dragRow));
         }
     }
 
@@ -464,20 +492,21 @@ public abstract class BackpackScreenMixin {
      * 60fps 下大约 4 帧到位，观感是"滑过去"而不是"跳过去"。
      */
     @Unique
-    private void sbaddon$stepTo(int r) {
+    private void sbaddon$stepTo(int r, ItemStack sample) {
+        String key = sbaddon$rowKey(sample, r);
         float target = sbaddon$targetY(r);
-        Float current = sbaddon$rowY.get(r);
+        Float current = sbaddon$rowY.get(key);
         if (current == null || sbaddon$dragRow == r) {
-            sbaddon$rowY.put(r, target);
+            sbaddon$rowY.put(key, target);
             return;
         }
         float diff = target - current;
-        sbaddon$rowY.put(r, Math.abs(diff) < 0.4f ? target : current + diff * 0.45f);
+        sbaddon$rowY.put(key, Math.abs(diff) < 0.4f ? target : current + diff * 0.45f);
     }
 
     @Unique
-    private float sbaddon$displayY(int r) {
-        Float v = sbaddon$rowY.get(r);
+    private float sbaddon$displayY(int r, ItemStack sample) {
+        Float v = sbaddon$rowY.get(sbaddon$rowKey(sample, r));
         return v != null ? v : sbaddon$listTop() + (r - sbaddon$panelScroll) * (float) SBADDON_ROW_H;
     }
 
@@ -518,8 +547,10 @@ public abstract class BackpackScreenMixin {
                 iconX + SBADDON_CELL + 2, panelTop + 6, SBADDON_COLOR_TEXT, false);
 
         List<ItemStack> samples = sbaddon$snapshot.samples();
+        // 拖拽状态每帧按鼠标位置推进（不依赖 mouseDragged 注入），让位动画才有数据可插值
+        sbaddon$tickDrag(mouseY);
         sbaddon$clampPanelScroll();
-        sbaddon$updateRowPositions(samples.size());
+        sbaddon$updateRowPositions(samples);
 
         // 先画普通行，被拖的行最后画，压在其他行上面
         int last = Math.min(samples.size(), sbaddon$panelScroll + SBADDON_ROWS_VISIBLE);
@@ -528,12 +559,12 @@ public abstract class BackpackScreenMixin {
                 continue;
             }
             sbaddon$drawEntryRow(graphics, font, mouseX, mouseY, r, samples.get(r),
-                    Math.round(sbaddon$displayY(r)));
+                    Math.round(sbaddon$displayY(r, samples.get(r))));
         }
         if (sbaddon$dragRow >= 0 && sbaddon$dragRow < samples.size()) {
             int r = sbaddon$dragRow;
             sbaddon$drawEntryRow(graphics, font, mouseX, mouseY, r, samples.get(r),
-                    Math.round(sbaddon$displayY(r)));
+                    Math.round(sbaddon$displayY(r, samples.get(r))));
         }
 
         // 底部固定行：空槽 + 提示 + 绿色「一键分类」（和精妙背包的空行同款结构）
@@ -635,12 +666,12 @@ public abstract class BackpackScreenMixin {
         int boxY = y + 3;
         int boxH = h - 6;
 
-        // 行位置是动画值，输入框必须每帧跟着走，否则改名期间行还在缓动、文字就跑出边框
+        // 输入框每帧跟着行动画走，并保持「文字位置」的几何（见 startRename 里的说明）
         EditBox box = sbaddon$editBox;
         if (box != null) {
-            box.setX(boxX);
-            box.setY(boxY);
-            box.setWidth(boxW);
+            box.setX(boxX + SBADDON_TEXT_INSET);
+            box.setY(boxY + (boxH - 8) / 2);
+            box.setWidth(Math.max(8, boxW - SBADDON_TEXT_INSET * 2));
         }
 
         graphics.fill(boxX, boxY, boxX + boxW, boxY + boxH, 0xFF1B1B1B);
@@ -848,7 +879,7 @@ public abstract class BackpackScreenMixin {
             }
             if (sbaddon$inside(mouseX, mouseY, hit[6], hit[2], SBADDON_DELETE_W, hit[4])) {
                 sbaddon$send(FxntClassifyAction.remove(hit[0]));
-                sbaddon$rowY.clear();
+                // 不清缓存：位置是按分组 id 记的，删掉一条后其余条目自己滑上来
                 sbaddon$clampPanelScroll();
                 return;
             }
@@ -884,20 +915,39 @@ public abstract class BackpackScreenMixin {
         if (sbaddon$dragRow < 0) {
             return;
         }
-        sbaddon$dragMouseY = mouseY;
-        int total = sbaddon$snapshot.samples().size();
-        if (total <= 0) {
-            cir.setReturnValue(true);
+        sbaddon$tickDrag(mouseY);
+        cir.setReturnValue(true);
+    }
+
+    /**
+     * 拖拽状态的每帧推进：拿鼠标当前 y 更新「跟手位置」和「落点行」。
+     * <p>
+     * 不依赖 {@code mouseDragged} 注入（那是快路径），渲染循环本身每帧都有鼠标坐标，
+     * 这样即使拖拽事件在某些路径下没派发到本界面，排序和让位动画照样成立。
+     * 同时用左键的物理状态兜底判定松手，避免拖拽状态卡死。
+     */
+    @Unique
+    private void sbaddon$tickDrag(double mouseY) {
+        if (sbaddon$dragRow < 0) {
             return;
         }
+        if (!Minecraft.getInstance().mouseHandler.isLeftPressed()) {
+            sbaddon$finishDrag();
+            return;
+        }
+        int total = sbaddon$snapshot.samples().size();
+        if (total <= 0) {
+            sbaddon$finishDrag();
+            return;
+        }
+        sbaddon$dragMouseY = mouseY;
 
         int visible = SBADDON_ROWS_VISIBLE;
         int maxScroll = Math.max(0, total - visible);
         int top = sbaddon$listTop();
         int bottom = top + visible * SBADDON_ROW_H;
 
-        // 拖到列表上下边缘（还在列表范围内、没越界）就自动滚动一行，
-        // 这样才能把条目拖到当前看不见的位置
+        // 拖到列表上下边缘就自动滚一行，这样才能把条目拖到当前看不见的位置
         if (mouseY < top + SBADDON_ROW_H && sbaddon$panelScroll > 0) {
             sbaddon$panelScroll--;
         } else if (mouseY > bottom - SBADDON_ROW_H && sbaddon$panelScroll < maxScroll) {
@@ -906,7 +956,18 @@ public abstract class BackpackScreenMixin {
 
         int row = sbaddon$panelScroll + (int) Math.floor((mouseY - top) / (double) SBADDON_ROW_H);
         sbaddon$dragTarget = Math.min(Math.max(row, 0), total - 1);
-        cir.setReturnValue(true);
+    }
+
+    /** 结束拖拽：落点和起点不同就提交新顺序。 */
+    @Unique
+    private void sbaddon$finishDrag() {
+        int from = sbaddon$dragRow;
+        int to = sbaddon$dragTarget;
+        sbaddon$dragRow = -1;
+        sbaddon$dragTarget = -1;
+        if (from >= 0 && to >= 0 && from != to) {
+            sbaddon$send(FxntClassifyAction.reorder(from, to));
+        }
     }
 
     @Inject(method = "mouseReleased", at = @At("HEAD"), cancellable = true)
@@ -915,52 +976,8 @@ public abstract class BackpackScreenMixin {
         if (sbaddon$dragRow < 0) {
             return;
         }
-        int from = sbaddon$dragRow;
-        int to = sbaddon$dragTarget;
-        // 松手瞬间被拖行的视觉位置
-        float releasedY = sbaddon$displayY(from);
-        sbaddon$dragRow = -1;
-        sbaddon$dragTarget = -1;
-        if (button == 0 && to >= 0 && from != to) {
-            // 缓存 key 是「行索引」，重排后索引对应的条目换了 —— 必须按同一置换搬一次，
-            // 让每一行**保持当前像素位置**。直接清空会让服务端回包那一刻整列跳到静态位置，
-            // 表现出来就是"重播一遍动画"的闪跳。
-            sbaddon$shiftRowCache(from, to);
-            sbaddon$rowY.put(to, releasedY);
-            sbaddon$send(FxntClassifyAction.reorder(from, to));
-        } else {
-            sbaddon$rowY.clear();
-        }
+        sbaddon$finishDrag();
         cir.setReturnValue(true);
-    }
-
-    /**
-     * 把行位置缓存按「第 from 条移到第 to 条」的置换重排：搬完后每个索引拿到的还是它原来的像素 y，
-     * 因此服务端把新顺序同步回来时，没有任何一行会闪跳 —— 只有被拖的那行从松手位置滑向新槽位。
-     */
-    @Unique
-    private void sbaddon$shiftRowCache(int from, int to) {
-        Map<Integer, Float> next = new HashMap<>();
-        for (Map.Entry<Integer, Float> entry : sbaddon$rowY.entrySet()) {
-            int r = entry.getKey();
-            if (r == from) {
-                // 被拖的那行单独处理（要落在目标槽位上），否则它的旧 y 会被让位行覆盖
-                continue;
-            }
-            int mapped = r;
-            if (from < to) {
-                // from 之后的整体上移一格
-                if (r > from && r <= to) {
-                    mapped = r - 1;
-                }
-            } else if (r >= to && r < from) {
-                // to 之前的整体下移一格
-                mapped = r + 1;
-            }
-            next.put(mapped, entry.getValue());
-        }
-        sbaddon$rowY.clear();
-        sbaddon$rowY.putAll(next);
     }
 
     @Inject(method = "mouseScrolled", at = @At("HEAD"), cancellable = true)
@@ -1044,7 +1061,7 @@ public abstract class BackpackScreenMixin {
         String id = ClassifyGroups.groupId(samples.get(row));
         String custom = id == null ? null : sbaddon$snapshot.names().get(id);
 
-        int y = Math.round(sbaddon$displayY(row));
+        int y = Math.round(sbaddon$displayY(row, samples.get(row)));
         int x = sbaddon$rowX();
         int w = sbaddon$rowW();
         int nameX = x + 1 + SBADDON_CELL + 2;
@@ -1053,7 +1070,11 @@ public abstract class BackpackScreenMixin {
         int boxW = Math.max(12, saveX - 3 - nameX);
 
         Font font = Minecraft.getInstance().font;
-        EditBox box = new EditBox(font, nameX, y + 3, boxW, SBADDON_ROW_FILL_H - 6,
+        // bordered=false 的 EditBox 把文字画在控件**左上角原坐标**（不减边、不垂直居中），
+        // 所以控件矩形必须直接取「文字应该出现的位置」：边框内缩 4px、垂直居中。
+        EditBox box = new EditBox(font, nameX + SBADDON_TEXT_INSET,
+                y + 3 + (SBADDON_ROW_FILL_H - 6 - 8) / 2,
+                Math.max(8, boxW - SBADDON_TEXT_INSET * 2), 8,
                 Component.translatable("gui.sbaddon.classify.title"));
         box.setMaxLength(32);
         // 边框自己画（和精妙背包同一个深色输入框），EditBox 只负责收字和画字
