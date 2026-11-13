@@ -144,12 +144,6 @@ public abstract class BackpackScreenMixin {
     @Shadow
     private int topVisibleRow;
 
-    @Shadow
-    protected abstract void initializeItemSlots();
-
-    @Shadow
-    protected abstract void setTopRowAndMoveThumb(int oldTopRow, int newTopRow);
-
     // ---------------------------------------------------------------- 布局
 
     @Inject(method = "render", at = @At("HEAD"))
@@ -171,8 +165,7 @@ public abstract class BackpackScreenMixin {
                 sbaddon$scroll = 0;
                 sbaddon$panelOpen = false;
                 sbaddon$stopEditing(false);
-                initializeItemSlots();
-                setTopRowAndMoveThumb(0, topVisibleRow);
+                sbaddon$restoreVanillaSlots(menu);
             }
             return;
         }
@@ -208,6 +201,30 @@ public abstract class BackpackScreenMixin {
         sbaddon$banners = result.banners();
         sbaddon$placements = result.placements();
         sbaddon$applied = true;
+    }
+
+    /**
+     * 把物品槽摆回 FXNT 的原始位置。
+     * <p>
+     * 不走它的 {@code initializeItemSlots()}（私有方法，mixin 影子调用虽然可行但多一层风险）：
+     * 公式在 {@code BackpackScreen#initializeItemSlots} 里是固定的
+     * {@code x = 29 + col * 18 + 1}、{@code y = 17 + row * 18 + 1}，滚出可视区的行置 -2000。
+     */
+    @Unique
+    private void sbaddon$restoreVanillaSlots(BackpackMenu menu) {
+        int rows = Math.max(1, containerRows);
+        int slots = menu.layout.items().getCount();
+        for (int i = 0; i < slots; i++) {
+            Slot slot = menu.getSlot(i);
+            int row = i / SBADDON_COLS - topVisibleRow;
+            if (row < 0 || row >= rows) {
+                slot.x = SBADDON_ORIGIN_X;
+                slot.y = -2000;
+            } else {
+                slot.x = SBADDON_ORIGIN_X + (i % SBADDON_COLS) * SBADDON_CELL;
+                slot.y = SBADDON_ORIGIN_Y + row * SBADDON_CELL;
+            }
+        }
     }
 
     /** 面板列表一屏装不下时，滚动位置要跟着条目数收敛。 */
