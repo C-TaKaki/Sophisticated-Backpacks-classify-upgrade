@@ -35,6 +35,7 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
@@ -72,6 +73,7 @@ public abstract class BackpackScreenMixin {
     private static final int SBADDON_HIDDEN = -10000;
 
     // ---------------------------------------------------------------- 面板常量
+    // 全部对齐精妙背包的 ClassifyTab：行 20 / 填充 18 / 行尾三个 9px 按钮。
 
     @Unique
     private static final int SBADDON_PANEL_W = 150;
@@ -79,6 +81,8 @@ public abstract class BackpackScreenMixin {
     private static final int SBADDON_HEADER_H = 22;
     @Unique
     private static final int SBADDON_ROW_H = 20;
+    @Unique
+    private static final int SBADDON_ROW_FILL_H = 18;
     @Unique
     private static final int SBADDON_ROWS_VISIBLE = 6;
     @Unique
@@ -88,8 +92,13 @@ public abstract class BackpackScreenMixin {
             SBADDON_HEADER_H + SBADDON_ROWS_VISIBLE * SBADDON_ROW_H + SBADDON_FOOTER_H;
     @Unique
     private static final int SBADDON_PAD = 4;
+    /** 行尾：改名（铅笔）/ 删除（叉）/ 拖拽手柄（三横），各 9px，间距 1px。 */
     @Unique
-    private static final int SBADDON_BTN = 9;
+    private static final int SBADDON_EDIT_W = 9;
+    @Unique
+    private static final int SBADDON_DELETE_W = 9;
+    @Unique
+    private static final int SBADDON_HANDLE_W = 9;
     @Unique
     private static final int SBADDON_AUTO_W = 44;
     @Unique
@@ -106,6 +115,8 @@ public abstract class BackpackScreenMixin {
     @Unique
     private static final int SBADDON_COLOR_ROW_HOVER = 0xFF9E9E9E;
     @Unique
+    private static final int SBADDON_COLOR_ROW_DRAG = 0xFF9CB088;
+    @Unique
     private static final int SBADDON_COLOR_ROW_HL = 0xFFB8B8B8;
     @Unique
     private static final int SBADDON_COLOR_ROW_SH = 0xFF5E5E5E;
@@ -113,6 +124,8 @@ public abstract class BackpackScreenMixin {
     private static final int SBADDON_COLOR_TEXT = 0xFF1E1E1E;
     @Unique
     private static final int SBADDON_COLOR_TEXT_DIM = 0xFF5A5A5A;
+    @Unique
+    private static final int SBADDON_COLOR_HANDLE = 0xFF3C3C3C;
 
     // ---------------------------------------------------------------- 状态
 
@@ -139,6 +152,27 @@ public abstract class BackpackScreenMixin {
     /** 改名用的输入框。1.21.1 的 Screen 没有 charTyped 可注入，只能挂一个真的 EditBox 让控件自己收字。 */
     @Unique
     private EditBox sbaddon$editBox;
+    /** 改名态右侧勾/叉的命中区：{x, y, w, h}。渲染时写入，点击时读。 */
+    @Unique
+    private int[] sbaddon$saveHit;
+    @Unique
+    private int[] sbaddon$cancelHit;
+
+    /** 本帧各行的命中区：{行号, x, y, w, h, 手柄x, 删除x, 改名x}。 */
+    @Unique
+    private final List<int[]> sbaddon$rowHits = new ArrayList<>();
+
+    // 拖拽 + 让位动画（与精妙背包 ClassifyTab 同一套算法）
+    @Unique
+    private int sbaddon$dragRow = -1;
+    @Unique
+    private int sbaddon$dragTarget = -1;
+    @Unique
+    private double sbaddon$dragMouseY;
+    @Unique
+    private final Map<Integer, Float> sbaddon$rowY = new HashMap<>();
+    @Unique
+    private int sbaddon$lastPanelScroll;
 
     // ---------------------------------------------------------------- 影子成员
 
@@ -175,6 +209,7 @@ public abstract class BackpackScreenMixin {
                 sbaddon$scroll = 0;
                 sbaddon$panelOpen = false;
                 sbaddon$stopEditing(false);
+                sbaddon$cancelDrag();
                 sbaddon$restoreVanillaSlots(menu);
             }
             return;
@@ -342,7 +377,7 @@ public abstract class BackpackScreenMixin {
         }
     }
 
-    // ---------------------------------------------------------------- 面板
+    // ---------------------------------------------------------------- 面板几何
 
     @Unique
     private int sbaddon$panelLeft() {
@@ -360,9 +395,96 @@ public abstract class BackpackScreenMixin {
         return sbaddon$tabTop() - 2;
     }
 
+    @Unique
+    private int sbaddon$rowX() {
+        return sbaddon$panelLeft() + SBADDON_PAD;
+    }
+
+    @Unique
+    private int sbaddon$rowW() {
+        return SBADDON_PANEL_W - SBADDON_PAD * 2;
+    }
+
+    /** 列表第一行的 y。 */
+    @Unique
+    private int sbaddon$listTop() {
+        return sbaddon$panelTop() + SBADDON_HEADER_H;
+    }
+
+    @Unique
+    private int sbaddon$footerTop() {
+        return sbaddon$listTop() + SBADDON_ROWS_VISIBLE * SBADDON_ROW_H;
+    }
+
+    // ---------------------------------------------------------------- 让位动画
+
+    /** 该行的目标 y：拖动中的行跟手，其余行按「谁让位」错开一格。 */
+    @Unique
+    private float sbaddon$targetY(int r) {
+        if (sbaddon$dragRow == r) {
+            double follow = sbaddon$dragMouseY - SBADDON_ROW_H / 2.0;
+            double clamped = Math.max(sbaddon$listTop() - SBADDON_ROW_H / 2.0,
+                    Math.min(follow, sbaddon$footerTop()));
+            return (float) clamped;
+        }
+        int shifted = r;
+        if (sbaddon$dragRow >= 0 && sbaddon$dragTarget >= 0) {
+            if (sbaddon$dragRow < r && r <= sbaddon$dragTarget) {
+                // 后面的行整体上移一格，把位置让出来
+                shifted = r - 1;
+            } else if (sbaddon$dragTarget <= r && r < sbaddon$dragRow) {
+                // 前面的行整体下移一格
+                shifted = r + 1;
+            }
+        }
+        return sbaddon$listTop() + (shifted - sbaddon$panelScroll) * (float) SBADDON_ROW_H;
+    }
+
+    /** 每帧刷新一次所有可见行的显示位置。 */
+    @Unique
+    private void sbaddon$updateRowPositions(int total) {
+        if (sbaddon$lastPanelScroll != sbaddon$panelScroll) {
+            // 滚动时内容整列平移，插值会变成"从上往下滑"的补偿动画 —— 直接丢掉缓存
+            sbaddon$rowY.clear();
+            sbaddon$lastPanelScroll = sbaddon$panelScroll;
+        }
+        sbaddon$rowY.keySet().removeIf(r -> r >= total);
+        int last = Math.min(total, sbaddon$panelScroll + SBADDON_ROWS_VISIBLE);
+        for (int r = sbaddon$panelScroll; r < last; r++) {
+            sbaddon$stepTo(r);
+        }
+        if (sbaddon$dragRow >= 0) {
+            sbaddon$stepTo(sbaddon$dragRow);
+        }
+    }
+
     /**
-     * 面板绘制。视觉照抄精妙背包那套分类页：标题栏带图标格、每条是凸起立体行
-     * （顶 1px 高光 / 底 1px 阴影）、行尾三个深色字形按钮、底部固定行放绿色「一键分类」。
+     * 朝目标位置插值。拖动中的行不做插值（否则跟不上鼠标），其余行按 0.45 的系数收敛，
+     * 60fps 下大约 4 帧到位，观感是"滑过去"而不是"跳过去"。
+     */
+    @Unique
+    private void sbaddon$stepTo(int r) {
+        float target = sbaddon$targetY(r);
+        Float current = sbaddon$rowY.get(r);
+        if (current == null || sbaddon$dragRow == r) {
+            sbaddon$rowY.put(r, target);
+            return;
+        }
+        float diff = target - current;
+        sbaddon$rowY.put(r, Math.abs(diff) < 0.4f ? target : current + diff * 0.45f);
+    }
+
+    @Unique
+    private float sbaddon$displayY(int r) {
+        Float v = sbaddon$rowY.get(r);
+        return v != null ? v : sbaddon$listTop() + (r - sbaddon$panelScroll) * (float) SBADDON_ROW_H;
+    }
+
+    // ---------------------------------------------------------------- 面板绘制
+
+    /**
+     * 面板绘制。视觉与功能都对齐精妙背包的分类页：标题栏带图标格、每条是凸起立体行、
+     * 行尾「铅笔 / 叉 / 三横手柄」，拖手柄可排序（其余行让位滑动），底部固定行放绿色「一键分类」。
      */
     @Unique
     private void sbaddon$drawPanel(GuiGraphics graphics, int mouseX, int mouseY) {
@@ -371,6 +493,10 @@ public abstract class BackpackScreenMixin {
         int tabTop = sbaddon$tabTop();
         int panelTop = sbaddon$panelTop();
         ItemStack upgradeIcon = new ItemStack(FxntCompatContent.CLASSIFY_UPGRADE.get());
+
+        sbaddon$rowHits.clear();
+        sbaddon$saveHit = null;
+        sbaddon$cancelHit = null;
 
         if (!sbaddon$panelOpen) {
             // 收起态：一个凸起的小页签，里面是升级物品图标
@@ -391,55 +517,32 @@ public abstract class BackpackScreenMixin {
                 iconX + SBADDON_CELL + 2, panelTop + 6, SBADDON_COLOR_TEXT, false);
 
         List<ItemStack> samples = sbaddon$snapshot.samples();
-        Map<String, String> names = sbaddon$snapshot.names();
         sbaddon$clampPanelScroll();
+        sbaddon$updateRowPositions(samples.size());
 
-        int rowX = panelLeft + SBADDON_PAD;
-        int rowW = SBADDON_PANEL_W - SBADDON_PAD * 2;
-        int rowAreaTop = panelTop + SBADDON_HEADER_H;
-        int rowH = SBADDON_ROW_H - 2;
-
-        for (int i = 0; i < SBADDON_ROWS_VISIBLE; i++) {
-            int index = sbaddon$panelScroll + i;
-            if (index >= samples.size()) {
-                break;
+        // 先画普通行，被拖的行最后画，压在其他行上面
+        int last = Math.min(samples.size(), sbaddon$panelScroll + SBADDON_ROWS_VISIBLE);
+        for (int r = sbaddon$panelScroll; r < last; r++) {
+            if (r == sbaddon$dragRow) {
+                continue;
             }
-            int ry = rowAreaTop + i * SBADDON_ROW_H;
-            boolean hovered = sbaddon$inside(mouseX, mouseY, rowX, ry, rowW, rowH);
-            sbaddon$drawRowFace(graphics, rowX, ry, rowW, rowH, hovered);
-
-            ClassifyGroups.Row row = ClassifyGroups.describe(samples.get(index), names);
-
-            // 图标格：和精妙背包设置页同一个槽位底图，物品正好落在凹槽里
-            int cellX = rowX + 1;
-            int cellY = ry + 1;
-            GuiHelper.renderSlotsBackground(graphics, cellX, cellY, 1, 1);
-            graphics.renderItem(row.icon(), cellX + 1, cellY + 1);
-
-            int crossX = rowX + rowW - SBADDON_BTN;
-            int downX = crossX - SBADDON_BTN - 2;
-            int upX = downX - SBADDON_BTN - 2;
-
-            String label = sbaddon$truncate(row.label().getString(),
-                    Math.max(0, upX - (cellX + SBADDON_CELL + 2) - 2));
-            if (sbaddon$editingRow != index) {
-                // 正在改名时文字由挂上去的 EditBox 自己画，这里让位
-                graphics.drawString(font, label, cellX + SBADDON_CELL + 2, ry + 5,
-                        SBADDON_COLOR_TEXT, false);
-            }
-
-            int btnY = ry + (rowH - SBADDON_BTN) / 2;
-            sbaddon$drawArrow(graphics, upX, btnY, true, sbaddon$inside(mouseX, mouseY, upX, btnY, SBADDON_BTN, SBADDON_BTN));
-            sbaddon$drawArrow(graphics, downX, btnY, false, sbaddon$inside(mouseX, mouseY, downX, btnY, SBADDON_BTN, SBADDON_BTN));
-            sbaddon$drawCross(graphics, crossX, btnY, sbaddon$inside(mouseX, mouseY, crossX, btnY, SBADDON_BTN, SBADDON_BTN));
+            sbaddon$drawEntryRow(graphics, font, mouseX, mouseY, r, samples.get(r),
+                    Math.round(sbaddon$displayY(r)));
+        }
+        if (sbaddon$dragRow >= 0 && sbaddon$dragRow < samples.size()) {
+            int r = sbaddon$dragRow;
+            sbaddon$drawEntryRow(graphics, font, mouseX, mouseY, r, samples.get(r),
+                    Math.round(sbaddon$displayY(r)));
         }
 
         // 底部固定行：空槽 + 提示 + 绿色「一键分类」（和精妙背包的空行同款结构）
-        int footerTop = panelTop + SBADDON_HEADER_H + SBADDON_ROWS_VISIBLE * SBADDON_ROW_H;
-        sbaddon$drawRowFace(graphics, rowX, footerTop, rowW, rowH, false);
-        GuiHelper.renderSlotsBackground(graphics, rowX + 1, footerTop + 1, 1, 1);
+        int rowX = sbaddon$rowX();
+        int rowW = sbaddon$rowW();
+        int footerTop = sbaddon$footerTop();
+        sbaddon$drawRowFace(graphics, rowX, footerTop, rowW, SBADDON_ROW_FILL_H, false);
+        GuiHelper.renderSlotsBackground(graphics, rowX + 1, footerTop, 1, 1);
         int autoX = rowX + rowW - SBADDON_AUTO_W - 6;
-        int autoY = footerTop + (rowH - SBADDON_AUTO_H) / 2;
+        int autoY = footerTop + (SBADDON_ROW_FILL_H - SBADDON_AUTO_H) / 2;
         if (sbaddon$editingRow < 0) {
             // 这一格只是"还能再加分类"的提示位：FXNT 没有样本槽，加不出幽灵拖放，
             // 所以文字如实说明是点右边的按钮扫描，不做假的"拖入"提示
@@ -459,18 +562,79 @@ public abstract class BackpackScreenMixin {
         graphics.drawString(font, autoLabel,
                 autoX + (SBADDON_AUTO_W - font.width(autoLabel)) / 2, autoY + 2, 0xFFF2F2F2, false);
 
-        // 列表滚动条
-        int total = samples.size();
-        if (total > SBADDON_ROWS_VISIBLE) {
-            int trackX = panelLeft + SBADDON_PANEL_W - 4;
-            int trackH = SBADDON_ROWS_VISIBLE * SBADDON_ROW_H - 2;
-            graphics.fill(trackX, rowAreaTop, trackX + 3, rowAreaTop + trackH, 0xFF6A6A6A);
-            int thumbH = Math.max(10, trackH * SBADDON_ROWS_VISIBLE / total);
-            int maxScroll = total - SBADDON_ROWS_VISIBLE;
-            int thumbY = rowAreaTop + (trackH - thumbH) * Math.min(sbaddon$panelScroll, maxScroll)
-                    / Math.max(1, maxScroll);
-            graphics.fill(trackX, thumbY, trackX + 3, thumbY + thumbH, 0xFFD8D8D8);
+        sbaddon$drawScrollbar(graphics, samples.size());
+    }
+
+    /** 一条分类：立体行底 + 图标格 + 名称 + 铅笔/叉/手柄。 */
+    @Unique
+    private void sbaddon$drawEntryRow(GuiGraphics graphics, Font font, int mouseX, int mouseY,
+                                      int r, ItemStack sample, int y) {
+        int x = sbaddon$rowX();
+        int w = sbaddon$rowW();
+        int h = SBADDON_ROW_FILL_H;
+        boolean dragging = sbaddon$dragRow == r;
+        boolean hovered = !dragging && sbaddon$inside(mouseX, mouseY, x, y, w, h);
+
+        int bg = dragging ? SBADDON_COLOR_ROW_DRAG
+                : hovered ? SBADDON_COLOR_ROW_HOVER : SBADDON_COLOR_ROW;
+        graphics.fill(x, y, x + w, y + h, bg);
+        graphics.fill(x, y, x + w, y + 1, SBADDON_COLOR_ROW_HL);
+        graphics.fill(x, y + h - 1, x + w, y + h, SBADDON_COLOR_ROW_SH);
+
+        // 图标格：和精妙背包设置页同一个槽位底图，物品正好落在凹槽里
+        int iconX = x + 1;
+        int iconY = y;
+        GuiHelper.renderSlotsBackground(graphics, iconX, iconY, 1, 1);
+        ClassifyGroups.Row row = ClassifyGroups.describe(sample, sbaddon$snapshot.names());
+        graphics.renderItem(row.icon(), iconX + 1, iconY + 1);
+
+        int handleX = x + w - SBADDON_HANDLE_W - 3;
+        int deleteX = handleX - SBADDON_DELETE_W - 1;
+        int editX = deleteX - SBADDON_EDIT_W - 1;
+        int nameX = iconX + SBADDON_CELL + 2;
+        int nameW = Math.max(0, editX - nameX - 3);
+        boolean editing = sbaddon$editingRow == r;
+
+        if (editing) {
+            // 编辑态：名称位置换成输入框，右侧只留勾/叉，铅笔、叉、手柄全部让位
+            sbaddon$drawRenameFrame(graphics, font, mouseX, mouseY, x, y, w, h, nameX);
+        } else {
+            graphics.drawString(font, sbaddon$truncate(row.label().getString(), nameW), nameX, y + 5,
+                    SBADDON_COLOR_TEXT, false);
+            sbaddon$drawPencil(graphics, editX, y, h,
+                    sbaddon$inside(mouseX, mouseY, editX, y, SBADDON_EDIT_W, h));
+            sbaddon$drawCross(graphics, deleteX, y, h,
+                    sbaddon$inside(mouseX, mouseY, deleteX, y, SBADDON_DELETE_W, h));
+            sbaddon$drawHandle(graphics, handleX, y, h, dragging);
         }
+
+        sbaddon$rowHits.add(new int[]{r, x, y, w, h, handleX, deleteX, editX});
+    }
+
+    /** 改名态的一行：深色输入框（EditBox 自己画字）+ 右侧勾/叉。 */
+    @Unique
+    private void sbaddon$drawRenameFrame(GuiGraphics graphics, Font font, int mouseX, int mouseY,
+                                         int x, int y, int w, int h, int nameX) {
+        int right = x + w - 3;
+        int cancelX = right - SBADDON_EDIT_W;
+        int saveX = cancelX - SBADDON_EDIT_W - 1;
+        int boxX = nameX;
+        int boxW = Math.max(12, saveX - 3 - boxX);
+        int boxY = y + 3;
+        int boxH = h - 6;
+
+        graphics.fill(boxX, boxY, boxX + boxW, boxY + boxH, 0xFF1B1B1B);
+        int border = 0xFF7AA0D8;
+        graphics.fill(boxX, boxY, boxX + boxW, boxY + 1, border);
+        graphics.fill(boxX, boxY + boxH - 1, boxX + boxW, boxY + boxH, border);
+        graphics.fill(boxX, boxY, boxX + 1, boxY + boxH, border);
+        graphics.fill(boxX + boxW - 1, boxY, boxX + boxW, boxY + boxH, border);
+
+        sbaddon$drawCheck(graphics, saveX, y, h, sbaddon$inside(mouseX, mouseY, saveX, y, SBADDON_EDIT_W, h));
+        sbaddon$drawCrossGlyph(graphics, cancelX, y, h,
+                sbaddon$inside(mouseX, mouseY, cancelX, y, SBADDON_EDIT_W, h));
+        sbaddon$saveHit = new int[]{saveX, y, SBADDON_EDIT_W, h};
+        sbaddon$cancelHit = new int[]{cancelX, y, SBADDON_EDIT_W, h};
     }
 
     @Unique
@@ -482,9 +646,9 @@ public abstract class BackpackScreenMixin {
     /** 一行：底色 + 顶部高光 + 底部阴影，和精妙背包分类页的行完全一致。 */
     @Unique
     private void sbaddon$drawRowFace(GuiGraphics graphics, int x, int y, int w, int h, boolean hovered) {
-        graphics.fill(x, y, x + w, y + h, hovered ? 0xFF9E9E9E : 0xFF8E8E8E);
-        graphics.fill(x, y, x + w, y + 1, 0xFFB8B8B8);
-        graphics.fill(x, y + h - 1, x + w, y + h, 0xFF5E5E5E);
+        graphics.fill(x, y, x + w, y + h, hovered ? SBADDON_COLOR_ROW_HOVER : SBADDON_COLOR_ROW);
+        graphics.fill(x, y, x + w, y + 1, SBADDON_COLOR_ROW_HL);
+        graphics.fill(x, y + h - 1, x + w, y + h, SBADDON_COLOR_ROW_SH);
     }
 
     /** 凸起方块（收起态页签用）。 */
@@ -497,33 +661,100 @@ public abstract class BackpackScreenMixin {
         graphics.fill(x + w - 1, y, x + w, y + h, 0xFF555555);
     }
 
-    /** 行尾「上移 / 下移」：一个小三角，用精妙背包手柄同款的深灰色。 */
+    /** 拖拽手柄：三条横线，和精妙背包的 drawHandle 同参数。 */
     @Unique
-    private void sbaddon$drawArrow(GuiGraphics graphics, int x, int y, boolean up, boolean hovered) {
-        if (hovered) {
-            graphics.fill(x, y, x + SBADDON_BTN, y + SBADDON_BTN, 0xFF4A6FA3);
-        }
-        int color = hovered ? 0xFFFFFFFF : 0xFF3C3C3C;
-        for (int i = 0; i < 4; i++) {
-            int lineY = up ? y + 2 + i : y + 6 - i;
-            graphics.fill(x + 2 + i, lineY, x + 7 - i, lineY + 1, color);
+    private void sbaddon$drawHandle(GuiGraphics graphics, int x, int y, int h, boolean active) {
+        int color = active ? 0xFF1E1E1E : SBADDON_COLOR_HANDLE;
+        int spacing = 3;
+        int totalH = 2 * spacing + 1;
+        int cx = x + 2;
+        int cy = y + (h - totalH) / 2;
+        for (int i = 0; i < 3; i++) {
+            int lineY = cy + i * spacing;
+            graphics.fill(cx, lineY, cx + 5, lineY + 1, color);
         }
     }
 
-    /** 行尾「删除」：7×7 两条 45° 对角线，画法和精妙背包的删除按钮一致。 */
+    /** 行尾「改名」：一支 45° 铅笔，和精妙背包的 drawEdit 同一画法。 */
     @Unique
-    private void sbaddon$drawCross(GuiGraphics graphics, int x, int y, boolean hovered) {
+    private void sbaddon$drawPencil(GuiGraphics graphics, int x, int y, int h, boolean hovered) {
         if (hovered) {
-            graphics.fill(x, y, x + SBADDON_BTN, y + SBADDON_BTN, 0xFFA34A4A);
+            graphics.fill(x, y + 2, x + SBADDON_EDIT_W, y + h - 2, 0xFF4A6FA3);
         }
-        int color = hovered ? 0xFFFFFFFF : 0xFF3C1A1A;
+        int color = hovered ? 0xFFFFFFFF : 0xFF20344D;
         int size = 7;
-        int cx = x + (SBADDON_BTN - size) / 2;
-        int cy = y + (SBADDON_BTN - size) / 2;
+        int cx = x + (SBADDON_EDIT_W - size) / 2;
+        int cy = y + (h - size) / 2;
+        for (int i = 0; i < 5; i++) {
+            graphics.fill(cx + i, cy + 5 - i, cx + i + 1, cy + 6 - i, color);
+        }
+        graphics.fill(cx + 5, cy, cx + 7, cy + 2, color);
+    }
+
+    /** 行尾「删除」：7×7 两条 45° 对角线，和精妙背包的 drawDelete 一致。 */
+    @Unique
+    private void sbaddon$drawCross(GuiGraphics graphics, int x, int y, int h, boolean hovered) {
+        if (hovered) {
+            graphics.fill(x, y + 2, x + SBADDON_DELETE_W, y + h - 2, 0xFFA34A4A);
+        }
+        sbaddon$drawXGlyph(graphics, x, y, h, SBADDON_DELETE_W,
+                hovered ? 0xFFFFFFFF : 0xFF3C1A1A);
+    }
+
+    /** 改名态右侧的「取消」叉：同画法，颜色偏取消。 */
+    @Unique
+    private void sbaddon$drawCrossGlyph(GuiGraphics graphics, int x, int y, int h, boolean hovered) {
+        if (hovered) {
+            graphics.fill(x, y + 2, x + SBADDON_EDIT_W, y + h - 2, 0xFFA34A4A);
+        }
+        sbaddon$drawXGlyph(graphics, x, y, h, SBADDON_EDIT_W,
+                hovered ? 0xFFFFFFFF : 0xFFE89B9B);
+    }
+
+    @Unique
+    private void sbaddon$drawXGlyph(GuiGraphics graphics, int x, int y, int h, int w, int color) {
+        int size = 7;
+        int cx = x + (w - size) / 2;
+        int cy = y + (h - size) / 2;
         for (int i = 0; i < size; i++) {
             graphics.fill(cx + i, cy + i, cx + i + 1, cy + i + 1, color);
             graphics.fill(cx + size - 1 - i, cy + i, cx + size - i, cy + i + 1, color);
         }
+    }
+
+    /** 改名态右侧的「保存」勾：两段对角线拼出来的对号。 */
+    @Unique
+    private void sbaddon$drawCheck(GuiGraphics graphics, int x, int y, int h, boolean hovered) {
+        if (hovered) {
+            graphics.fill(x, y + 2, x + SBADDON_EDIT_W, y + h - 2, 0xFF4F8A4F);
+        }
+        int color = hovered ? 0xFFFFFFFF : 0xFF9BE89B;
+        int cx = x + (SBADDON_EDIT_W - 7) / 2;
+        int cy = y + (h - 7) / 2;
+        for (int i = 0; i < 3; i++) {
+            graphics.fill(cx + 1 + i, cy + 3 + i, cx + 2 + i, cy + 4 + i, color);
+        }
+        for (int i = 0; i < 4; i++) {
+            graphics.fill(cx + 3 + i, cy + 5 - i, cx + 4 + i, cy + 6 - i, color);
+        }
+    }
+
+    /** 内容超出可视行数时，右侧画一条滚动条（轨道 + 滑块），参数同精妙背包。 */
+    @Unique
+    private void sbaddon$drawScrollbar(GuiGraphics graphics, int total) {
+        if (total <= SBADDON_ROWS_VISIBLE) {
+            return;
+        }
+        int x = sbaddon$panelLeft() + SBADDON_PANEL_W - 3;
+        int top = sbaddon$listTop();
+        int trackH = SBADDON_ROWS_VISIBLE * SBADDON_ROW_H - 2;
+        graphics.fill(x, top, x + 3, top + trackH, 0xFF6A6A6A);
+
+        int thumbH = Math.max(10, trackH * SBADDON_ROWS_VISIBLE / total);
+        int maxScroll = total - SBADDON_ROWS_VISIBLE;
+        int thumbY = top + (trackH - thumbH) * Math.min(sbaddon$panelScroll, maxScroll)
+                / Math.max(1, maxScroll);
+        graphics.fill(x, thumbY, x + 3, thumbY + thumbH, 0xFFD8D8D8);
     }
 
     @Unique
@@ -557,6 +788,7 @@ public abstract class BackpackScreenMixin {
         if (sbaddon$inside(mouseX, mouseY, panelLeft, tabTop, 20, 20)) {
             sbaddon$panelOpen = !sbaddon$panelOpen;
             sbaddon$stopEditing(false);
+            sbaddon$cancelDrag();
             cir.setReturnValue(true);
             return;
         }
@@ -572,57 +804,99 @@ public abstract class BackpackScreenMixin {
         // 面板内的一切点击都吃掉，避免穿透到下面的槽位
         cir.setReturnValue(true);
 
-        int rowX = panelLeft + SBADDON_PAD;
-        int rowW = SBADDON_PANEL_W - SBADDON_PAD * 2;
-        int rowAreaTop = panelTop + SBADDON_HEADER_H;
-        List<ItemStack> samples = sbaddon$snapshot.samples();
-
-        int slot = (int) ((mouseY - rowAreaTop) / SBADDON_ROW_H);
-        if (slot >= 0 && slot < SBADDON_ROWS_VISIBLE) {
-            int index = sbaddon$panelScroll + slot;
-            int ry = rowAreaTop + slot * SBADDON_ROW_H;
-            int btnY = ry + (SBADDON_ROW_H - 2 - SBADDON_BTN) / 2;
-            int crossX = rowX + rowW - SBADDON_BTN;
-            int downX = crossX - SBADDON_BTN - 2;
-            int upX = downX - SBADDON_BTN - 2;
-
-            if (sbaddon$inside(mouseX, mouseY, crossX, btnY, SBADDON_BTN, SBADDON_BTN)) {
-                if (index < samples.size()) {
-                    sbaddon$send(FxntClassifyAction.remove(index));
-                    sbaddon$stopEditing(false);
-                }
+        // 编辑态优先吃点击：勾=保存，叉=放弃，点别处按放弃处理
+        if (sbaddon$editingRow >= 0) {
+            if (sbaddon$saveHit != null && sbaddon$inside(mouseX, mouseY,
+                    sbaddon$saveHit[0], sbaddon$saveHit[1], sbaddon$saveHit[2], sbaddon$saveHit[3])) {
+                sbaddon$stopEditing(true);
                 return;
             }
-            if (sbaddon$inside(mouseX, mouseY, downX, btnY, SBADDON_BTN, SBADDON_BTN)) {
-                if (index < samples.size()) {
-                    sbaddon$send(FxntClassifyAction.move(index, 1));
-                }
-                return;
-            }
-            if (sbaddon$inside(mouseX, mouseY, upX, btnY, SBADDON_BTN, SBADDON_BTN)) {
-                if (index < samples.size()) {
-                    sbaddon$send(FxntClassifyAction.move(index, -1));
-                }
-                return;
-            }
-            if (index < samples.size() && mouseX >= rowX + 21 && mouseX < upX - 2) {
-                // 点名字 → 就地改名（挂一个 EditBox 盖在文字上，字由它自己收）
-                sbaddon$startRename(index, rowX + 21, ry + 2, Math.max(40, upX - rowX - 23),
-                        SBADDON_ROW_H - 6, samples.get(index));
-                return;
-            }
-            if (index < samples.size()) {
+            if (sbaddon$cancelHit != null && sbaddon$inside(mouseX, mouseY,
+                    sbaddon$cancelHit[0], sbaddon$cancelHit[1], sbaddon$cancelHit[2], sbaddon$cancelHit[3])) {
                 sbaddon$stopEditing(false);
+                return;
+            }
+            sbaddon$stopEditing(false);
+            return;
+        }
+
+        for (int[] hit : sbaddon$rowHits) {
+            if (sbaddon$inside(mouseX, mouseY, hit[8], hit[3], SBADDON_EDIT_W, hit[5])) {
+                sbaddon$startRename(hit[0]);
+                return;
+            }
+            if (sbaddon$inside(mouseX, mouseY, hit[7], hit[3], SBADDON_DELETE_W, hit[5])) {
+                sbaddon$send(FxntClassifyAction.remove(hit[0]));
+                sbaddon$rowY.clear();
+                sbaddon$clampPanelScroll();
+                return;
+            }
+            if (sbaddon$inside(mouseX, mouseY, hit[6], hit[3], SBADDON_HANDLE_W, hit[5])) {
+                sbaddon$dragRow = hit[0];
+                sbaddon$dragTarget = hit[0];
+                sbaddon$dragMouseY = mouseY;
+                return;
             }
         }
 
-        int footerY = panelTop + SBADDON_HEADER_H + SBADDON_ROWS_VISIBLE * SBADDON_ROW_H;
-        int autoX = rowX + rowW - SBADDON_AUTO_W - 6;
-        int autoY = footerY + (SBADDON_ROW_H - 2 - SBADDON_AUTO_H) / 2;
+        int autoX = sbaddon$rowX() + sbaddon$rowW() - SBADDON_AUTO_W - 6;
+        int autoY = sbaddon$footerTop() + (SBADDON_ROW_FILL_H - SBADDON_AUTO_H) / 2;
         if (sbaddon$inside(mouseX, mouseY, autoX, autoY, SBADDON_AUTO_W, SBADDON_AUTO_H)) {
             sbaddon$send(FxntClassifyAction.auto());
-            sbaddon$stopEditing(false);
+            sbaddon$rowY.clear();
         }
+    }
+
+    @Inject(method = "mouseDragged", at = @At("HEAD"), cancellable = true)
+    private void sbaddon$onDrag(double mouseX, double mouseY, int button, double dragX, double dragY,
+                                CallbackInfoReturnable<Boolean> cir) {
+        if (sbaddon$dragRow < 0) {
+            return;
+        }
+        sbaddon$dragMouseY = mouseY;
+        int total = sbaddon$snapshot.samples().size();
+        if (total <= 0) {
+            cir.setReturnValue(true);
+            return;
+        }
+
+        int visible = SBADDON_ROWS_VISIBLE;
+        int maxScroll = Math.max(0, total - visible);
+        int top = sbaddon$listTop();
+        int bottom = top + visible * SBADDON_ROW_H;
+
+        // 拖到列表上下边缘（还在列表范围内、没越界）就自动滚动一行，
+        // 这样才能把条目拖到当前看不见的位置
+        if (mouseY < top + SBADDON_ROW_H && sbaddon$panelScroll > 0) {
+            sbaddon$panelScroll--;
+        } else if (mouseY > bottom - SBADDON_ROW_H && sbaddon$panelScroll < maxScroll) {
+            sbaddon$panelScroll++;
+        }
+
+        int row = sbaddon$panelScroll + (int) Math.floor((mouseY - top) / (double) SBADDON_ROW_H);
+        sbaddon$dragTarget = Math.min(Math.max(row, 0), total - 1);
+        cir.setReturnValue(true);
+    }
+
+    @Inject(method = "mouseReleased", at = @At("HEAD"), cancellable = true)
+    private void sbaddon$onRelease(double mouseX, double mouseY, int button,
+                                   CallbackInfoReturnable<Boolean> cir) {
+        if (sbaddon$dragRow < 0) {
+            return;
+        }
+        int from = sbaddon$dragRow;
+        int to = sbaddon$dragTarget;
+        // 松手瞬间被拖行的视觉位置。重排后缓存必须清空：缓存的 key 是「行索引」，
+        // 而重排把各索引对应的条目换了，留着旧缓存会让每一行都从旧位置再滑一次
+        float releasedY = sbaddon$displayY(from);
+        sbaddon$dragRow = -1;
+        sbaddon$dragTarget = -1;
+        sbaddon$rowY.clear();
+        if (button == 0 && to >= 0 && from != to) {
+            sbaddon$send(FxntClassifyAction.reorder(from, to));
+            sbaddon$rowY.put(to, releasedY);
+        }
+        cir.setReturnValue(true);
     }
 
     @Inject(method = "mouseScrolled", at = @At("HEAD"), cancellable = true)
@@ -635,8 +909,19 @@ public abstract class BackpackScreenMixin {
         int panelLeft = sbaddon$panelLeft();
         int panelTop = sbaddon$panelTop();
 
-        if (sbaddon$panelOpen && sbaddon$inside(mouseX, mouseY, panelLeft, panelTop,
-                SBADDON_PANEL_W, SBADDON_PANEL_H)) {
+        // 拖拽中滚轮一律不响应：自动滚动由 mouseDragged 按位置驱动，
+        // 手动滚一下会让「拖到哪行」的映射跳一格
+        if (sbaddon$dragRow >= 0) {
+            cir.setReturnValue(true);
+            return;
+        }
+
+        if (sbaddon$panelOpen
+                && sbaddon$inside(mouseX, mouseY, panelLeft, panelTop, SBADDON_PANEL_W, SBADDON_PANEL_H)) {
+            // 滚动会换掉行索引对应的条目，正在改名/拖动时先收尾
+            if (sbaddon$editingRow >= 0) {
+                sbaddon$stopEditing(false);
+            }
             sbaddon$panelScroll += delta;
             sbaddon$clampPanelScroll();
             cir.setReturnValue(true);
@@ -686,15 +971,30 @@ public abstract class BackpackScreenMixin {
     /** 打字本身由 EditBox 通过焦点链收到，这里不需要再接管 charTyped。 */
 
     @Unique
-    private void sbaddon$startRename(int row, int x, int y, int w, int h, ItemStack sample) {
+    private void sbaddon$startRename(int row) {
         sbaddon$stopEditing(false);
-        String id = ClassifyGroups.groupId(sample);
+        List<ItemStack> samples = sbaddon$snapshot.samples();
+        if (row < 0 || row >= samples.size()) {
+            return;
+        }
+        String id = ClassifyGroups.groupId(samples.get(row));
         String custom = id == null ? null : sbaddon$snapshot.names().get(id);
 
+        int y = Math.round(sbaddon$displayY(row));
+        int x = sbaddon$rowX();
+        int w = sbaddon$rowW();
+        int nameX = x + 1 + SBADDON_CELL + 2;
+        int cancelX = x + w - 3 - SBADDON_EDIT_W;
+        int saveX = cancelX - SBADDON_EDIT_W - 1;
+        int boxW = Math.max(12, saveX - 3 - nameX);
+
         Font font = Minecraft.getInstance().font;
-        EditBox box = new EditBox(font, x, y, w, h, Component.translatable("gui.sbaddon.classify.title"));
+        EditBox box = new EditBox(font, nameX, y + 3, boxW, SBADDON_ROW_FILL_H - 6,
+                Component.translatable("gui.sbaddon.classify.title"));
         box.setMaxLength(32);
-        box.setBordered(true);
+        // 边框自己画（和精妙背包同一个深色输入框），EditBox 只负责收字和画字
+        box.setBordered(false);
+        box.setTextColor(0xFFE8E8E8);
         box.setValue(custom == null ? "" : custom);
         box.setFocused(true);
         sbaddon$editBox = ((ScreenAccess) sbaddon$self()).sbaddon$addRenderableWidget(box);
@@ -708,6 +1008,8 @@ public abstract class BackpackScreenMixin {
         int row = sbaddon$editingRow;
         sbaddon$editBox = null;
         sbaddon$editingRow = -1;
+        sbaddon$saveHit = null;
+        sbaddon$cancelHit = null;
 
         if (box != null) {
             ((ScreenAccess) sbaddon$self()).sbaddon$removeWidget(box);
@@ -725,6 +1027,16 @@ public abstract class BackpackScreenMixin {
             return;
         }
         sbaddon$send(FxntClassifyAction.rename(id, box.getValue()));
+    }
+
+    @Unique
+    private void sbaddon$cancelDrag() {
+        if (sbaddon$dragRow < 0) {
+            return;
+        }
+        sbaddon$dragRow = -1;
+        sbaddon$dragTarget = -1;
+        sbaddon$rowY.clear();
     }
 
     /** 面板在界面外，得加进排除区，否则点一下就把背包关掉了。 */

@@ -31,6 +31,8 @@ public record FxntClassifyAction(int action, int index, int dir, String groupId,
     public static final int ACTION_REMOVE = 1;
     public static final int ACTION_MOVE = 2;
     public static final int ACTION_RENAME = 3;
+    /** 拖拽排序：index = 源行，dir = 目标行。 */
+    public static final int ACTION_REORDER = 4;
 
     public static final Type<FxntClassifyAction> TYPE =
             new Type<>(ResourceLocation.fromNamespaceAndPath(SBAddon.MOD_ID, "fxnt_classify_action"));
@@ -54,6 +56,10 @@ public record FxntClassifyAction(int action, int index, int dir, String groupId,
 
     public static FxntClassifyAction move(int index, int dir) {
         return new FxntClassifyAction(ACTION_MOVE, index, dir, "", "");
+    }
+
+    public static FxntClassifyAction reorder(int from, int to) {
+        return new FxntClassifyAction(ACTION_REORDER, from, to, "", "");
     }
 
     public static FxntClassifyAction rename(String groupId, String name) {
@@ -99,6 +105,14 @@ public record FxntClassifyAction(int action, int index, int dir, String groupId,
                     }
                     ItemStack moved = samples.remove(index);
                     samples.add(target, moved);
+                }
+                case ACTION_REORDER -> {
+                    if (index < 0 || index >= samples.size() || dir < 0 || dir >= samples.size()
+                            || index == dir) {
+                        return;
+                    }
+                    ItemStack moved = samples.remove(index);
+                    samples.add(dir, moved);
                 }
                 case ACTION_RENAME -> {
                     FxntClassifyData.setName(stack, groupId, name);
