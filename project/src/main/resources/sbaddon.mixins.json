@@ -8,7 +8,8 @@
     "ScreenAccess",
     "StorageContainerMenuBaseMixin",
     "StorageScreenBaseMixin",
-    "InventoryScrollPanelMixin"
+    "InventoryScrollPanelMixin",
+    "ScrollPanelMixin"
   ],
   "injectors": {
     "defaultRequire": 1

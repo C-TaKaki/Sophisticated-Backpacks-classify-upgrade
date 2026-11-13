@@ -14,7 +14,7 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
  * <ul>
  *   <li>{@code getContentHeight()} 返回 0 —— {@code ScrollPanel.render} 只有在
  *       内容高于可视区时才画滚动条，同时滚动范围也归零；</li>
- *   <li>鼠标三个事件直接吃掉，拇指/轨道拖不动。</li>
+ *   <li>鼠标点击吃掉（拇指在父类 {@code ScrollPanel} 里拖，见 {@link ScrollPanelMixin}）。</li>
  * </ul>
  */
 @Mixin(InventoryScrollPanel.class)
@@ -35,19 +35,5 @@ public abstract class InventoryScrollPanelMixin {
         }
     }
 
-    @Inject(method = "mouseDragged", at = @At("HEAD"), cancellable = true)
-    private void sbaddon$onDrag(double mouseX, double mouseY, int button, double dragX, double dragY,
-                                CallbackInfoReturnable<Boolean> cir) {
-        if (ClassifyViewState.lockScrollPanel) {
-            cir.setReturnValue(false);
-        }
-    }
 
-    @Inject(method = "mouseReleased", at = @At("HEAD"), cancellable = true)
-    private void sbaddon$onRelease(double mouseX, double mouseY, int button,
-                                   CallbackInfoReturnable<Boolean> cir) {
-        if (ClassifyViewState.lockScrollPanel) {
-            cir.setReturnValue(false);
-        }
-    }
 }
