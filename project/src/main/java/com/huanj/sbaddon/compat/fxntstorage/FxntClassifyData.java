@@ -146,6 +146,32 @@ public final class FxntClassifyData {
 
     // ---------------------------------------------------------------- 增删改
 
+    /**
+     * 拖入物品新增一条分类：按「命名空间」去重（和 {@link #autoClassify} 同一口径，
+     * 属性过滤器也算在它自己的命名空间下），满了或已存在则原样返回。
+     */
+    public static List<ItemStack> addSample(List<ItemStack> existing, ItemStack stack) {
+        List<ItemStack> result = new ArrayList<>(existing);
+        if (stack.isEmpty() || result.size() >= SAMPLE_LIMIT) {
+            return result;
+        }
+        net.minecraft.resources.ResourceLocation key =
+                net.minecraft.core.registries.BuiltInRegistries.ITEM.getKey(stack.getItem());
+        String namespace = key == null ? "" : key.getNamespace();
+        for (ItemStack sample : result) {
+            if (sample.isEmpty()) {
+                continue;
+            }
+            net.minecraft.resources.ResourceLocation sampleKey =
+                    net.minecraft.core.registries.BuiltInRegistries.ITEM.getKey(sample.getItem());
+            if (sampleKey != null && namespace.equals(sampleKey.getNamespace())) {
+                return result;
+            }
+        }
+        result.add(stack.copyWithCount(1));
+        return result;
+    }
+
     /** 一键分类：扫描背包物品槽，把每个模组的第一个物品加为样本。 */
     public static List<ItemStack> autoClassify(List<ItemStack> existing, List<ItemStack> storageStacks) {
         List<ItemStack> result = new ArrayList<>(existing);

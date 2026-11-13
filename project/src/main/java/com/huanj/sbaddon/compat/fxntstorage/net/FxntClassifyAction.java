@@ -33,6 +33,8 @@ public record FxntClassifyAction(int action, int index, int dir, String groupId,
     public static final int ACTION_RENAME = 3;
     /** 拖拽排序：index = 源行，dir = 目标行。 */
     public static final int ACTION_REORDER = 4;
+    /** 拖入物品新增分类：groupId 字段携带物品注册名。 */
+    public static final int ACTION_ADD = 5;
 
     public static final Type<FxntClassifyAction> TYPE =
             new Type<>(ResourceLocation.fromNamespaceAndPath(SBAddon.MOD_ID, "fxnt_classify_action"));
@@ -60,6 +62,10 @@ public record FxntClassifyAction(int action, int index, int dir, String groupId,
 
     public static FxntClassifyAction reorder(int from, int to) {
         return new FxntClassifyAction(ACTION_REORDER, from, to, "", "");
+    }
+
+    public static FxntClassifyAction add(String itemId) {
+        return new FxntClassifyAction(ACTION_ADD, 0, 0, itemId == null ? "" : itemId, "");
     }
 
     public static FxntClassifyAction rename(String groupId, String name) {
@@ -105,6 +111,18 @@ public record FxntClassifyAction(int action, int index, int dir, String groupId,
                     }
                     ItemStack moved = samples.remove(index);
                     samples.add(target, moved);
+                }
+                case ACTION_ADD -> {
+                    ResourceLocation itemId = ResourceLocation.tryParse(groupId);
+                    if (itemId == null) {
+                        return;
+                    }
+                    net.minecraft.world.item.Item item =
+                            net.minecraft.core.registries.BuiltInRegistries.ITEM.get(itemId);
+                    if (item == net.minecraft.world.item.Items.AIR) {
+                        return;
+                    }
+                    samples = FxntClassifyData.addSample(samples, new ItemStack(item));
                 }
                 case ACTION_REORDER -> {
                     if (index < 0 || index >= samples.size() || dir < 0 || dir >= samples.size()

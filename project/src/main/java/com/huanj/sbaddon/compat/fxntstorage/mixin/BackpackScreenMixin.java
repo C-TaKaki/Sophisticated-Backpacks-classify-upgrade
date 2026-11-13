@@ -19,6 +19,7 @@ import net.minecraft.client.gui.components.EditBox;
 import net.minecraft.client.gui.components.events.ContainerEventHandler;
 import net.minecraft.client.renderer.Rect2i;
 import net.minecraft.core.HolderLookup;
+import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
 import net.minecraft.world.inventory.Slot;
@@ -539,15 +540,26 @@ public abstract class BackpackScreenMixin {
         int rowX = sbaddon$rowX();
         int rowW = sbaddon$rowW();
         int footerTop = sbaddon$footerTop();
-        sbaddon$drawRowFace(graphics, rowX, footerTop, rowW, SBADDON_ROW_FILL_H, false);
+        boolean carrying = !sbaddon$self().getMenu().getCarried().isEmpty();
+        boolean dropHover = carrying && sbaddon$inside(mouseX, mouseY,
+                rowX + 1, footerTop, SBADDON_CELL, SBADDON_ROW_FILL_H);
+        sbaddon$drawRowFace(graphics, rowX, footerTop, rowW, SBADDON_ROW_FILL_H, dropHover);
         GuiHelper.renderSlotsBackground(graphics, rowX + 1, footerTop, 1, 1);
+        if (dropHover) {
+            // 手里拿着东西又悬在空槽上：把槽位描一圈绿，明确"可以松手放这里"
+            graphics.fill(rowX + 1, footerTop, rowX + 1 + SBADDON_CELL, footerTop + 1, 0xFF7DBF6A);
+            graphics.fill(rowX + 1, footerTop + SBADDON_CELL - 1, rowX + 1 + SBADDON_CELL,
+                    footerTop + SBADDON_CELL, 0xFF7DBF6A);
+            graphics.fill(rowX + 1, footerTop, rowX + 2, footerTop + SBADDON_CELL, 0xFF7DBF6A);
+            graphics.fill(rowX + SBADDON_CELL, footerTop, rowX + 1 + SBADDON_CELL,
+                    footerTop + SBADDON_CELL, 0xFF7DBF6A);
+        }
         int autoX = rowX + rowW - SBADDON_AUTO_W - 6;
         int autoY = footerTop + (SBADDON_ROW_FILL_H - SBADDON_AUTO_H) / 2;
         if (sbaddon$editingRow < 0) {
-            // 这一格只是"还能再加分类"的提示位：FXNT 没有样本槽，加不出幽灵拖放，
-            // 所以文字如实说明是点右边的按钮扫描，不做假的"拖入"提示
+            // 这一格是真交互：从背包里拖一件物品松手在这里，就把它所属的分组加进分类表
             String hint = sbaddon$truncate(
-                    Component.translatable("gui.sbaddon.classify.empty.hint").getString(),
+                    Component.translatable("gui.sbaddon.classify.row.empty").getString(),
                     Math.max(0, autoX - (rowX + SBADDON_CELL + 4) - 4));
             graphics.drawString(font, hint, rowX + SBADDON_CELL + 4, footerTop + 5,
                     SBADDON_COLOR_TEXT_DIM, false);
@@ -622,6 +634,14 @@ public abstract class BackpackScreenMixin {
         int boxW = Math.max(12, saveX - 3 - boxX);
         int boxY = y + 3;
         int boxH = h - 6;
+
+        // 行位置是动画值，输入框必须每帧跟着走，否则改名期间行还在缓动、文字就跑出边框
+        EditBox box = sbaddon$editBox;
+        if (box != null) {
+            box.setX(boxX);
+            box.setY(boxY);
+            box.setWidth(boxW);
+        }
 
         graphics.fill(boxX, boxY, boxX + boxW, boxY + boxH, 0xFF1B1B1B);
         int border = 0xFF7AA0D8;
@@ -822,22 +842,32 @@ public abstract class BackpackScreenMixin {
 
         for (int[] hit : sbaddon$rowHits) {
             // 布局：{行号, x, y, w, h, 手柄x, 删除x, 改名x}
-            if (sbaddon$inside(mouseX, mouseY, hit[7], hit[3], SBADDON_EDIT_W, hit[4])) {
+            if (sbaddon$inside(mouseX, mouseY, hit[7], hit[2], SBADDON_EDIT_W, hit[4])) {
                 sbaddon$startRename(hit[0]);
                 return;
             }
-            if (sbaddon$inside(mouseX, mouseY, hit[6], hit[3], SBADDON_DELETE_W, hit[4])) {
+            if (sbaddon$inside(mouseX, mouseY, hit[6], hit[2], SBADDON_DELETE_W, hit[4])) {
                 sbaddon$send(FxntClassifyAction.remove(hit[0]));
                 sbaddon$rowY.clear();
                 sbaddon$clampPanelScroll();
                 return;
             }
-            if (sbaddon$inside(mouseX, mouseY, hit[5], hit[3], SBADDON_HANDLE_W, hit[4])) {
+            if (sbaddon$inside(mouseX, mouseY, hit[5], hit[2], SBADDON_HANDLE_W, hit[4])) {
                 sbaddon$dragRow = hit[0];
                 sbaddon$dragTarget = hit[0];
                 sbaddon$dragMouseY = mouseY;
                 return;
             }
+        }
+
+        // 底部空槽：手里拿着物品点到这里 = 把该物品所属分组加进分类表（取副本，物品不从手上消失）
+        ItemStack carried = sbaddon$self().getMenu().getCarried();
+        if (!carried.isEmpty() && sbaddon$inside(mouseX, mouseY,
+                sbaddon$rowX() + 1, sbaddon$footerTop(), SBADDON_CELL, SBADDON_ROW_FILL_H)) {
+            sbaddon$send(FxntClassifyAction.add(
+                    BuiltInRegistries.ITEM.getKey(carried.getItem()).toString()));
+            sbaddon$rowY.clear();
+            return;
         }
 
         int autoX = sbaddon$rowX() + sbaddon$rowW() - SBADDON_AUTO_W - 6;
@@ -887,17 +917,50 @@ public abstract class BackpackScreenMixin {
         }
         int from = sbaddon$dragRow;
         int to = sbaddon$dragTarget;
-        // 松手瞬间被拖行的视觉位置。重排后缓存必须清空：缓存的 key 是「行索引」，
-        // 而重排把各索引对应的条目换了，留着旧缓存会让每一行都从旧位置再滑一次
+        // 松手瞬间被拖行的视觉位置
         float releasedY = sbaddon$displayY(from);
         sbaddon$dragRow = -1;
         sbaddon$dragTarget = -1;
-        sbaddon$rowY.clear();
         if (button == 0 && to >= 0 && from != to) {
-            sbaddon$send(FxntClassifyAction.reorder(from, to));
+            // 缓存 key 是「行索引」，重排后索引对应的条目换了 —— 必须按同一置换搬一次，
+            // 让每一行**保持当前像素位置**。直接清空会让服务端回包那一刻整列跳到静态位置，
+            // 表现出来就是"重播一遍动画"的闪跳。
+            sbaddon$shiftRowCache(from, to);
             sbaddon$rowY.put(to, releasedY);
+            sbaddon$send(FxntClassifyAction.reorder(from, to));
+        } else {
+            sbaddon$rowY.clear();
         }
         cir.setReturnValue(true);
+    }
+
+    /**
+     * 把行位置缓存按「第 from 条移到第 to 条」的置换重排：搬完后每个索引拿到的还是它原来的像素 y，
+     * 因此服务端把新顺序同步回来时，没有任何一行会闪跳 —— 只有被拖的那行从松手位置滑向新槽位。
+     */
+    @Unique
+    private void sbaddon$shiftRowCache(int from, int to) {
+        Map<Integer, Float> next = new HashMap<>();
+        for (Map.Entry<Integer, Float> entry : sbaddon$rowY.entrySet()) {
+            int r = entry.getKey();
+            if (r == from) {
+                // 被拖的那行单独处理（要落在目标槽位上），否则它的旧 y 会被让位行覆盖
+                continue;
+            }
+            int mapped = r;
+            if (from < to) {
+                // from 之后的整体上移一格
+                if (r > from && r <= to) {
+                    mapped = r - 1;
+                }
+            } else if (r >= to && r < from) {
+                // to 之前的整体下移一格
+                mapped = r + 1;
+            }
+            next.put(mapped, entry.getValue());
+        }
+        sbaddon$rowY.clear();
+        sbaddon$rowY.putAll(next);
     }
 
     @Inject(method = "mouseScrolled", at = @At("HEAD"), cancellable = true)
