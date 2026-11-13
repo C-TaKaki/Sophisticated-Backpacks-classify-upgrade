@@ -2,6 +2,7 @@ package com.huanj.sbaddon.mixin;
 
 import com.huanj.sbaddon.client.BannerBackground;
 import com.huanj.sbaddon.client.ClassifyTab;
+import com.huanj.sbaddon.client.ClassifyViewState;
 import com.huanj.sbaddon.client.layout.ClassifyGroups;
 import com.huanj.sbaddon.client.layout.ClassifyLayout;
 import com.huanj.sbaddon.client.layout.SbClassifySource;
@@ -77,33 +78,6 @@ public abstract class StorageScreenBaseMixin {
     @Shadow
     protected abstract void updateStorageSlotsPositions();
 
-    /**
-     * SB 的滚动面板。分类视图启用时把它从控件列表里摘掉：它拖拽滚动条会自己重排槽位，
-     * 和我们的布局打架（表现为整片物品消失）。
-     * <p>
-     * 注意它是 NeoForge 的 {@code ScrollPanel}，继承 {@code AbstractContainerEventHandler}
-     * 而不是 {@code AbstractWidget} —— 没有 {@code visible} 字段，只能 add/remove。
-     */
-    @Shadow
-    private InventoryScrollPanel inventoryScrollPanel;
-
-    /** 已被我们摘下来的那个面板实例（SB 在 resize 时会换新实例，所以记实例而不是布尔）。 */
-    @Unique
-    private InventoryScrollPanel sbaddon$detachedPanel;
-
-    @Unique
-    private void sbaddon$detachScrollPanel(boolean detach) {
-        if (detach) {
-            if (inventoryScrollPanel != null && inventoryScrollPanel != sbaddon$detachedPanel) {
-                ((ScreenAccess) (Object) this).sbaddon$removeWidget(inventoryScrollPanel);
-                sbaddon$detachedPanel = inventoryScrollPanel;
-            }
-        } else if (sbaddon$detachedPanel != null) {
-            ((ScreenAccess) (Object) this).sbaddon$addRenderableWidget(sbaddon$detachedPanel);
-            sbaddon$detachedPanel = null;
-        }
-    }
-
     @Inject(method = "render", at = @At("HEAD"))
     private void sbaddon$applyLayout(GuiGraphics graphics, int mouseX, int mouseY, float partialTick, CallbackInfo ci) {
         // 每帧先清空：升级被关掉 / 被拿掉时这里会提前 return，
@@ -119,6 +93,8 @@ public abstract class StorageScreenBaseMixin {
         }
         ClassifyUpgradeContainer container = sbaddon$findContainer(menu);
         boolean active = container != null && container.isUpgradeEnabled();
+        // 分类视图接管槽位排版时，让 SB 的滚动面板「只画物品、不滚动、不画条」
+        ClassifyViewState.lockScrollPanel = active;
         if (!active) {
             // 关闭分类或升级被拿掉：把我们藏起来的槽位还给 SB，网格恢复原版排版
             if (sbaddon$layoutApplied) {
@@ -126,14 +102,11 @@ public abstract class StorageScreenBaseMixin {
                 sbaddon$originX = Integer.MIN_VALUE;
                 sbaddon$appliedSlot0X = Integer.MIN_VALUE;
                 sbaddon$scroll = 0;
-                sbaddon$detachScrollPanel(false);
                 updateStorageSlotsPositions();
             }
             return;
         }
 
-        // 分类视图接管了槽位排版，SB 那个滚动条既不该显示也不该能拖
-        sbaddon$detachScrollPanel(true);
 
         int cols = self.getSlotsOnLine();
         int storageSlots = menu.getNumberOfStorageInventorySlots();
