@@ -77,6 +77,33 @@ public abstract class StorageScreenBaseMixin {
     @Shadow
     protected abstract void updateStorageSlotsPositions();
 
+    /**
+     * SB 的滚动面板。分类视图启用时把它从控件列表里摘掉：它拖拽滚动条会自己重排槽位，
+     * 和我们的布局打架（表现为整片物品消失）。
+     * <p>
+     * 注意它是 NeoForge 的 {@code ScrollPanel}，继承 {@code AbstractContainerEventHandler}
+     * 而不是 {@code AbstractWidget} —— 没有 {@code visible} 字段，只能 add/remove。
+     */
+    @Shadow
+    private InventoryScrollPanel inventoryScrollPanel;
+
+    /** 已被我们摘下来的那个面板实例（SB 在 resize 时会换新实例，所以记实例而不是布尔）。 */
+    @Unique
+    private InventoryScrollPanel sbaddon$detachedPanel;
+
+    @Unique
+    private void sbaddon$detachScrollPanel(boolean detach) {
+        if (detach) {
+            if (inventoryScrollPanel != null && inventoryScrollPanel != sbaddon$detachedPanel) {
+                ((ScreenAccess) (Object) this).sbaddon$removeWidget(inventoryScrollPanel);
+                sbaddon$detachedPanel = inventoryScrollPanel;
+            }
+        } else if (sbaddon$detachedPanel != null) {
+            ((ScreenAccess) (Object) this).sbaddon$addRenderableWidget(sbaddon$detachedPanel);
+            sbaddon$detachedPanel = null;
+        }
+    }
+
     @Inject(method = "render", at = @At("HEAD"))
     private void sbaddon$applyLayout(GuiGraphics graphics, int mouseX, int mouseY, float partialTick, CallbackInfo ci) {
         // 每帧先清空：升级被关掉 / 被拿掉时这里会提前 return，
@@ -99,10 +126,14 @@ public abstract class StorageScreenBaseMixin {
                 sbaddon$originX = Integer.MIN_VALUE;
                 sbaddon$appliedSlot0X = Integer.MIN_VALUE;
                 sbaddon$scroll = 0;
+                sbaddon$detachScrollPanel(false);
                 updateStorageSlotsPositions();
             }
             return;
         }
+
+        // 分类视图接管了槽位排版，SB 那个滚动条既不该显示也不该能拖
+        sbaddon$detachScrollPanel(true);
 
         int cols = self.getSlotsOnLine();
         int storageSlots = menu.getNumberOfStorageInventorySlots();
@@ -115,7 +146,8 @@ public abstract class StorageScreenBaseMixin {
         int rows = visibleRows;
 
         Slot slot0 = menu.getSlot(0);
-        if (slot0.x != sbaddon$appliedSlot0X || slot0.y != sbaddon$appliedSlot0Y) {
+        boolean slot0Moved = slot0.x != sbaddon$appliedSlot0X || slot0.y != sbaddon$appliedSlot0Y;
+        if (slot0Moved && slot0.x >= 0 && slot0.y >= 0) {
             // 首帧，或 SB 刚把槽位重设为自然位置（init / resize）
             sbaddon$originX = slot0.x;
             sbaddon$originY = slot0.y;
