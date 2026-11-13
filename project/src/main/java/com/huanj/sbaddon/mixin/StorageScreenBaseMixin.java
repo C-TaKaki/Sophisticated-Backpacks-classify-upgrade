@@ -4,6 +4,7 @@ import com.huanj.sbaddon.client.BannerBackground;
 import com.huanj.sbaddon.client.ClassifyTab;
 import com.huanj.sbaddon.client.layout.ClassifyGroups;
 import com.huanj.sbaddon.client.layout.ClassifyLayout;
+import com.huanj.sbaddon.client.layout.SbClassifySource;
 import com.huanj.sbaddon.compat.create.CreateAttributeFilterCompat;
 import com.huanj.sbaddon.upgrade.ClassifyUpgradeContainer;
 import net.minecraft.client.Minecraft;
@@ -120,14 +121,15 @@ public abstract class StorageScreenBaseMixin {
         }
 
         Predicate<net.minecraft.world.item.ItemStack> filter = self.getStackFilter();
+        SbClassifySource source = new SbClassifySource(menu, container);
         ClassifyLayout.Result result = ClassifyLayout.compute(
-                menu, container, cols, rows, sbaddon$scroll, filter, sbaddon$originX, sbaddon$originY);
+                source, cols, rows, sbaddon$scroll, filter, sbaddon$originX, sbaddon$originY);
 
         sbaddon$maxScroll = Math.max(0, result.totalRows() - rows);
         if (sbaddon$scroll > sbaddon$maxScroll) {
             sbaddon$scroll = sbaddon$maxScroll;
             result = ClassifyLayout.compute(
-                    menu, container, cols, rows, sbaddon$scroll, filter, sbaddon$originX, sbaddon$originY);
+                    source, cols, rows, sbaddon$scroll, filter, sbaddon$originX, sbaddon$originY);
         }
 
         for (int i = 0; i < storageSlots; i++) {

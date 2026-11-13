@@ -1,5 +1,6 @@
 package com.huanj.sbaddon;
 
+import com.huanj.sbaddon.compat.fxntstorage.FxntCompat;
 import com.huanj.sbaddon.registry.SBCreativeTabs;
 import com.huanj.sbaddon.registry.SBItems;
 import com.mojang.logging.LogUtils;
@@ -17,6 +18,9 @@ public class SBAddon {
     public SBAddon(IEventBus modEventBus, ModContainer modContainer) {
         SBItems.register(modEventBus);
         SBCreativeTabs.register(modEventBus);
+        // 可选兼容：装了 Create: Storage(fxntstorage) 才注册相关物品/网络包。
+        // FxntCompat 本身不引用任何 fxnt 类，未安装时这里只打一行日志。
+        FxntCompat.init(modEventBus);
         // 升级类型 / 容器类型在 FMLCommonSetupEvent 里注册（见 CommonSetup），
         // 因为 UpgradeContainerRegistry 的 key 必须是物品注册名，物品那时才真正注册完。
         LOGGER.info("[sbaddon] Sophisticated Backpacks Addon 已加载");

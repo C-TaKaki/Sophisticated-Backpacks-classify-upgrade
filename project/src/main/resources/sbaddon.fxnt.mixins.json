@@ -1,0 +1,16 @@
+{
+  "required": false,
+  "minVersion": "0.8",
+  "package": "com.huanj.sbaddon.compat.fxntstorage.mixin",
+  "plugin": "com.huanj.sbaddon.compat.fxntstorage.FxntMixinPlugin",
+  "compatibilityLevel": "JAVA_21",
+  "mixins": [
+    "UpgradeSlotMixin"
+  ],
+  "client": [
+    "BackpackScreenMixin"
+  ],
+  "injectors": {
+    "defaultRequire": 1
+  }
+}

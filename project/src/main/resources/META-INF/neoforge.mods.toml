@@ -49,7 +49,21 @@ versionRange = "[6.0.0,)"
 ordering = "AFTER"
 side = "BOTH"
 
+# Create: Storage（fxntstorage）：另一款带升级槽的背包模组。同样是可选兼容 ——
+# 未安装时不会注册任何物品、不会应用任何 mixin，原有精妙背包功能不受影响。
+[[dependencies.${mod_id}]]
+modId = "fxntstorage"
+type = "optional"
+versionRange = "[1.3.0,)"
+ordering = "AFTER"
+side = "BOTH"
+
 # 接管背包网格的槽位布局，实现"按模组分块 + 整行分类横幅"
 [[mixins]]
 config = "sbaddon.mixins.json"
+
+# Create: Storage 兼容。该配置文件自带 mixin 插件守卫（FxntMixinPlugin），
+# 未安装 fxntstorage 时整份配置不应用任何一条 mixin。
+[[mixins]]
+config = "sbaddon.fxnt.mixins.json"
 

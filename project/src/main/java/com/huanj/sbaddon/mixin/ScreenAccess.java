@@ -19,4 +19,8 @@ public interface ScreenAccess {
 
     @Invoker("addRenderableWidget")
     <T extends GuiEventListener & Renderable & NarratableEntry> T sbaddon$addRenderableWidget(T widget);
+
+    /** 用完把控件摘掉（改名输入框提交/取消时）。 */
+    @Invoker("removeWidget")
+    void sbaddon$removeWidget(GuiEventListener widget);
 }

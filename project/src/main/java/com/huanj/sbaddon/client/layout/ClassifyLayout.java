@@ -1,12 +1,10 @@
 package com.huanj.sbaddon.client.layout;
 
 import com.huanj.sbaddon.client.ModNames;
-import com.huanj.sbaddon.upgrade.ClassifyUpgradeContainer;
 import net.minecraft.client.Minecraft;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.network.chat.Component;
 import net.minecraft.world.item.ItemStack;
-import net.p3pp3rf1y.sophisticatedcore.common.gui.StorageContainerMenuBase;
 
 import java.util.ArrayList;
 import java.util.HashSet;
@@ -59,21 +57,20 @@ public final class ClassifyLayout {
     private record Cell(int y, int col) {
     }
 
-    public static Result compute(StorageContainerMenuBase<?> menu, ClassifyUpgradeContainer container,
-                                 int cols, int rows, int scrollRows, Predicate<ItemStack> filter,
-                                 int originX, int originY) {
-        int storageSlots = menu.getNumberOfStorageInventorySlots();
+    public static Result compute(ClassifySource source, int cols, int rows, int scrollRows,
+                                 Predicate<ItemStack> filter, int originX, int originY) {
+        int storageSlots = source.storageSlots();
         if (storageSlots <= 0 || cols <= 0 || rows <= 0) {
             return Result.empty();
         }
 
-        List<ItemStack> samples = container.getSampleStacks();
+        List<ItemStack> samples = source.samples();
         // 分组来源统一：模组样本 → 按命名空间；属性过滤器样本 → 按过滤器自带的匹配逻辑。
         // Create 缺席 / 过滤器不可解析时该样本不产生分组，模组分类照常工作。
         List<ClassifyGroup> groups = ClassifyGroups.build(samples, Minecraft.getInstance().level,
-                container.getCustomNames());
+                source.customNames());
 
-        SlotMemory.syncMenu(menu, storageSlots);
+        SlotMemory.syncMenu(source.identity(), storageSlots);
 
         Map<String, List<Integer>> buckets = new LinkedHashMap<>();
         for (ClassifyGroup group : groups) {
@@ -83,7 +80,7 @@ public final class ClassifyLayout {
 
         boolean[] occupied = new boolean[storageSlots];
         for (int i = 0; i < storageSlots; i++) {
-            ItemStack stack = menu.getSlot(i).getItem();
+            ItemStack stack = source.stackAt(i);
             if (stack.isEmpty()) {
                 continue;
             }
