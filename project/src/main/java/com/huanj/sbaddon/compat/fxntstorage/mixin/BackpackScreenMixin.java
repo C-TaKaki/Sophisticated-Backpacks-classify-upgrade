@@ -17,6 +17,7 @@ import net.minecraft.client.gui.Font;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.components.EditBox;
 import net.minecraft.client.gui.components.events.ContainerEventHandler;
+import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.client.renderer.Rect2i;
 import net.minecraft.core.HolderLookup;
 import net.minecraft.core.registries.BuiltInRegistries;
@@ -1031,6 +1032,10 @@ public abstract class BackpackScreenMixin {
     private void sbaddon$onScroll(double mouseX, double mouseY, double scrollX, double scrollY,
                                   CallbackInfoReturnable<Boolean> cir) {
         if (!sbaddon$applied) {
+            // 没装分类升级也要生效：按住 Shift 就暂停背包上下滚动
+            if (Screen.hasShiftDown()) {
+                cir.setReturnValue(true);
+            }
             return;
         }
         int delta = scrollY > 0 ? -1 : 1;
@@ -1057,6 +1062,12 @@ public abstract class BackpackScreenMixin {
         }
 
         BackpackScreen self = sbaddon$self();
+        // 按住 Shift 时暂停背包上下滚动（分类面板里那个列表不受影响，上面已经先处理掉了）。
+        // 这里同时吃掉 FXNT 自己那一套按行号的滚动，否则它还会滚。
+        if (Screen.hasShiftDown()) {
+            cir.setReturnValue(true);
+            return;
+        }
         if (sbaddon$maxScroll > 0 && sbaddon$inside(mouseX, mouseY,
                 self.getGuiLeft() + SBADDON_ORIGIN_X, self.getGuiTop() + SBADDON_ORIGIN_Y,
                 SBADDON_COLS * SBADDON_CELL, Math.max(1, containerRows) * SBADDON_CELL)) {

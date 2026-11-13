@@ -10,6 +10,7 @@ import com.huanj.sbaddon.upgrade.ClassifyUpgradeContainer;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.Font;
 import net.minecraft.client.gui.GuiGraphics;
+import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.network.chat.Component;
 import net.minecraft.world.inventory.AbstractContainerMenu;
 import net.minecraft.world.inventory.Slot;
@@ -198,6 +199,12 @@ public abstract class StorageScreenBaseMixin {
         // 先问打开的分类页签：鼠标落在它的列表上就只滚列表，别带动背包网格
         ClassifyTab tab = ClassifyTab.getActiveTab();
         if (tab != null && tab.scrollList(mouseX, mouseY, scrollY)) {
+            cir.setReturnValue(true);
+            return;
+        }
+        // 按住 Shift 时暂停背包上下滚动（分类页签里的列表不受影响，上面已经先处理掉了）。
+        // 放在 maxScroll 判断之前：普通视图的滚动也要一起停掉。
+        if (Screen.hasShiftDown()) {
             cir.setReturnValue(true);
             return;
         }
