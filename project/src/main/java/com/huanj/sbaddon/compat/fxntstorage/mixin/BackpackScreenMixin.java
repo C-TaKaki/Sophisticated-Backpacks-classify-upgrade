@@ -74,6 +74,8 @@ public abstract class BackpackScreenMixin {
     @Unique
     private static final int SBADDON_CELL_TEX_V = 17;
     @Unique
+    private static final int SBADDON_CELL_TEX_W = 282;
+    @Unique
     private static final int SBADDON_ORIGIN_X = 30;
     @Unique
     private static final int SBADDON_ORIGIN_Y = 18;
@@ -155,6 +157,9 @@ public abstract class BackpackScreenMixin {
     private ResourceLocation sbaddon$cellTexture;
     @Unique
     private String sbaddon$cellTextureSuffix = "";
+    /** 当前那套贴图的实际高度（宽固定 282）。blit 必须按真实尺寸算 UV，否则整片错位。 */
+    @Unique
+    private int sbaddon$cellTextureHeight;
 
     @Unique
     private FxntClassifyData.Snapshot sbaddon$snapshot = FxntClassifyData.Snapshot.empty();
@@ -397,8 +402,11 @@ public abstract class BackpackScreenMixin {
         ResourceLocation texture = sbaddon$cellTexture();
         for (ClassifyLayout.Placement placement : sbaddon$placements) {
             // placement 是「物品」坐标，贴图格子比它左上各多 1px
+            // 注意用 9 参数重载：7 参数版本默认按 256×256 算 UV，这张贴图是 282×{225,281,317}，
+            // 用它会把格子整片拉歪
             graphics.blit(texture, left + placement.x() - 1, top + placement.y() - 1,
-                    SBADDON_CELL_TEX_U, SBADDON_CELL_TEX_V, SBADDON_CELL, SBADDON_CELL);
+                    SBADDON_CELL_TEX_U, SBADDON_CELL_TEX_V, SBADDON_CELL, SBADDON_CELL,
+                    SBADDON_CELL_TEX_W, sbaddon$cellTextureHeight);
         }
     }
 
@@ -411,6 +419,12 @@ public abstract class BackpackScreenMixin {
             sbaddon$cellTexture = ResourceLocation.fromNamespaceAndPath("fxntstorage",
                     "textures/gui/container/backpack_screen_" + suffix + ".png");
             sbaddon$cellTextureSuffix = suffix;
+            // 三套贴图实测尺寸：4 行 282×225 / 7 行 282×281 / 9 行 282×317
+            sbaddon$cellTextureHeight = switch (suffix) {
+                case "4" -> 225;
+                case "7" -> 281;
+                default -> 317;
+            };
         }
         return sbaddon$cellTexture;
     }
