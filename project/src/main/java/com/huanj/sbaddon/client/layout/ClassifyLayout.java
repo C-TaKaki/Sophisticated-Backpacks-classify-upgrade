@@ -41,7 +41,7 @@ public final class ClassifyLayout {
     private ClassifyLayout() {
     }
 
-    public record Banner(int x, int y, int width, ItemStack icon, Component label) {
+    public record Banner(int x, int y, int width, ItemStack icon, Component label, String id) {
     }
 
     public record Placement(int slotIndex, int x, int y) {
@@ -57,8 +57,13 @@ public final class ClassifyLayout {
     private record Cell(int y, int col) {
     }
 
+    /**
+     * @param collapsed 收起的分类分组（横幅右侧的按钮切换）；收起后该组只留横幅，物品不占位，
+     *                  后面的组顺着往上提 —— 过渡由调用方插值
+     */
     public static Result compute(ClassifySource source, int cols, int rows, int scrollRows,
-                                 Predicate<ItemStack> filter, int originX, int originY) {
+                                 Predicate<ItemStack> filter, Predicate<String> collapsed,
+                                 int originX, int originY) {
         int storageSlots = source.storageSlots();
         if (storageSlots <= 0 || cols <= 0 || rows <= 0) {
             return Result.empty();
@@ -137,14 +142,18 @@ public final class ClassifyLayout {
                 continue;
             }
             List<Integer> merged = mergeHoles(items, group.id(), holes, claimed);
+            boolean groupCollapsed = collapsed != null && collapsed.test(group.id());
             row = placeGroup(row, cols, rows, scrollRows, group.label(), group.icon(),
-                    merged, originX, originY, banners, placements, gaps);
+                    groupCollapsed ? List.of() : merged, groupCollapsed, group.id(),
+                    originX, originY, banners, placements, gaps);
         }
         if (!fallback.isEmpty() || SlotMemory.wasActive(SlotMemory.FALLBACK)) {
             List<Integer> merged = mergeHoles(fallback, SlotMemory.FALLBACK, holes, claimed);
+            boolean fallbackCollapsed = collapsed != null && collapsed.test(SlotMemory.FALLBACK);
             row = placeGroup(row, cols, rows, scrollRows,
                     Component.translatable("gui.sbaddon.classify.fallback"), iconFor(samples, null),
-                    merged, originX, originY, banners, placements, gaps);
+                    fallbackCollapsed ? List.of() : merged, fallbackCollapsed, SlotMemory.FALLBACK,
+                    originX, originY, banners, placements, gaps);
         }
         int contentY = row;
 
@@ -233,14 +242,19 @@ public final class ClassifyLayout {
      * 因为横幅行比物品行多占 {@link #BANNER_GAP} 的间距，纯行号算不准。
      */
     private static int placeGroup(int y, int cols, int rows, int scrollRows, Component label, ItemStack icon,
-                                  List<Integer> items, int originX, int originY,
+                                  List<Integer> items, boolean collapsed, String groupId,
+                                  int originX, int originY,
                                   List<Banner> banners, List<Placement> placements, List<Cell> gaps) {
         int scrollPx = scrollRows * CELL;
         int viewHeight = rows * CELL;
 
         int bannerY = y - scrollPx;
         if (bannerY >= 0 && bannerY < viewHeight) {
-            banners.add(new Banner(originX, originY + bannerY, cols * CELL, icon, label));
+            banners.add(new Banner(originX, originY + bannerY, cols * CELL, icon, label, groupId));
+        }
+        if (collapsed) {
+            // 收起：只占横幅那一行，物品槽全部不摆（它们的槽位保持隐藏），下面的组自动上提
+            return y + CELL + BANNER_GAP;
         }
 
         int itemTop = y + CELL + BANNER_GAP;

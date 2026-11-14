@@ -1,9 +1,12 @@
 package com.huanj.sbaddon.compat.fxntstorage.mixin;
 
 import com.huanj.sbaddon.client.BannerBackground;
+import com.huanj.sbaddon.client.layout.ClassifyCollapse;
 import com.huanj.sbaddon.client.layout.ClassifyGroups;
 import com.huanj.sbaddon.client.layout.ClassifyLayout;
+import com.huanj.sbaddon.client.layout.ClassifyMotion;
 import com.huanj.sbaddon.client.layout.ClassifySource;
+import com.huanj.sbaddon.client.widget.ExpandCollapseButton;
 import com.huanj.sbaddon.compat.fxntstorage.FxntClassifyData;
 import com.huanj.sbaddon.compat.fxntstorage.FxntClassifyMenu;
 import com.huanj.sbaddon.compat.fxntstorage.FxntCompatContent;
@@ -146,6 +149,18 @@ public abstract class BackpackScreenMixin {
     private List<ClassifyLayout.Banner> sbaddon$banners = List.of();
     @Unique
     private List<ClassifyLayout.Placement> sbaddon$placements = List.of();
+    /** 槽位 / 横幅的过渡动画（展开收起时下面的组滑上来）。 */
+    @Unique
+    private final ClassifyMotion sbaddon$motion = new ClassifyMotion();
+    /** 横幅 id → 本帧显示 y。 */
+    @Unique
+    private final Map<String, Integer> sbaddon$bannerDrawY = new HashMap<>();
+    /** 横幅右侧展开按钮的命中区：id → {x, y}。 */
+    @Unique
+    private final Map<String, int[]> sbaddon$toggleHits = new HashMap<>();
+    /** 上一帧滚动行，滚动时不播过渡动画。 */
+    @Unique
+    private int sbaddon$lastMotionScroll = -1;
     @Unique
     private int sbaddon$scroll;
     @Unique
@@ -271,6 +286,8 @@ public abstract class BackpackScreenMixin {
         sbaddon$banners = List.of();
         sbaddon$placements = List.of();
         sbaddon$maxScroll = 0;
+        sbaddon$bannerDrawY.clear();
+        sbaddon$toggleHits.clear();
 
         BackpackScreen self = sbaddon$self();
         BackpackMenu menu = self.getMenu();
@@ -285,6 +302,7 @@ public abstract class BackpackScreenMixin {
                 sbaddon$localOrder = null;
                 sbaddon$stopEditing(false);
                 sbaddon$cancelDrag();
+                sbaddon$motion.reset();
                 sbaddon$restoreVanillaSlots(menu);
             }
             return;
@@ -297,29 +315,49 @@ public abstract class BackpackScreenMixin {
         ClassifySource source = new FxntClassifySource(menu, sbaddon$samples(),
                 sbaddon$snapshot.names());
         ClassifyLayout.Result result = ClassifyLayout.compute(
-                source, SBADDON_COLS, rows, sbaddon$scroll, null, SBADDON_ORIGIN_X, SBADDON_ORIGIN_Y);
+                source, SBADDON_COLS, rows, sbaddon$scroll, null, ClassifyCollapse::isCollapsed,
+                SBADDON_ORIGIN_X, SBADDON_ORIGIN_Y);
 
         sbaddon$maxScroll = Math.max(0, result.totalRows() - rows);
         if (sbaddon$scroll > sbaddon$maxScroll) {
             sbaddon$scroll = sbaddon$maxScroll;
             result = ClassifyLayout.compute(
-                    source, SBADDON_COLS, rows, sbaddon$scroll, null, SBADDON_ORIGIN_X, SBADDON_ORIGIN_Y);
+                    source, SBADDON_COLS, rows, sbaddon$scroll, null, ClassifyCollapse::isCollapsed,
+                    SBADDON_ORIGIN_X, SBADDON_ORIGIN_Y);
         }
 
+        // 滚动时整片内容平移，插值会变成"追着滚"的补偿动画 —— 丢掉缓存让它瞬间落位
+        if (sbaddon$scroll != sbaddon$lastMotionScroll) {
+            sbaddon$motion.reset();
+            sbaddon$lastMotionScroll = sbaddon$scroll;
+        }
+
+        sbaddon$motion.beginFrame();
         int slotCount = menu.layout.items().getCount();
         for (int i = 0; i < slotCount; i++) {
             Slot slot = menu.getSlot(i);
             slot.x = SBADDON_HIDDEN;
             slot.y = SBADDON_HIDDEN;
         }
+        List<ClassifyLayout.Placement> animated = new ArrayList<>(result.placements().size());
         for (ClassifyLayout.Placement placement : result.placements()) {
             Slot slot = menu.getSlot(placement.slotIndex());
-            slot.x = placement.x();
-            slot.y = placement.y();
+            // 用插值后的显示坐标：展开/收起时物品滑过去，不是瞬移
+            float[] pos = sbaddon$motion.slot(placement.slotIndex(), placement.x(), placement.y());
+            slot.x = Math.round(pos[0]);
+            slot.y = Math.round(pos[1]);
+            // 格子贴图也按显示坐标平铺，动画期间不会和物品错开
+            animated.add(new ClassifyLayout.Placement(placement.slotIndex(), slot.x, slot.y));
         }
+        sbaddon$bannerDrawY.clear();
+        for (ClassifyLayout.Banner banner : result.banners()) {
+            sbaddon$bannerDrawY.put(banner.id(),
+                    Math.round(sbaddon$motion.bannerY(banner.id(), banner.y())));
+        }
+        sbaddon$motion.endFrame();
 
         sbaddon$banners = result.banners();
-        sbaddon$placements = result.placements();
+        sbaddon$placements = animated;
         sbaddon$applied = true;
     }
 
@@ -382,7 +420,7 @@ public abstract class BackpackScreenMixin {
         sbaddon$blitCells(graphics, left, top);
 
         // 3) 整行分类横幅
-        sbaddon$drawBanners(graphics, left, top);
+        sbaddon$drawBanners(graphics, left, top, mouseX, mouseY);
 
         // 4) 配置面板
         sbaddon$drawPanel(graphics, mouseX, mouseY);
@@ -430,14 +468,15 @@ public abstract class BackpackScreenMixin {
     }
 
     @Unique
-    private void sbaddon$drawBanners(GuiGraphics graphics, int left, int top) {
+    private void sbaddon$drawBanners(GuiGraphics graphics, int left, int top, int mouseX, int mouseY) {
         if (sbaddon$banners.isEmpty()) {
             return;
         }
         Font font = Minecraft.getInstance().font;
         for (ClassifyLayout.Banner banner : sbaddon$banners) {
             int x = left + banner.x() - 1;
-            int y = top + banner.y() - 1;
+            int drawY = sbaddon$bannerDrawY.getOrDefault(banner.id(), banner.y());
+            int y = top + drawY - 1;
             int right = x + banner.width();
             int boxH = ClassifyLayout.CELL - ClassifyLayout.BANNER_INSET * 2;
             BannerBackground.render(graphics, x, y, banner.width(), boxH);
@@ -452,9 +491,18 @@ public abstract class BackpackScreenMixin {
                 graphics.pose().popPose();
             }
 
+            // 横幅右端的展开/收起按钮
+            int btnX = right - ExpandCollapseButton.SIZE - 2;
+            int btnY = y + (ClassifyLayout.CELL - ExpandCollapseButton.SIZE) / 2;
+            boolean btnHovered = ExpandCollapseButton.isOver(btnX, btnY, mouseX, mouseY);
+            ExpandCollapseButton.render(graphics, btnX, btnY,
+                    ClassifyCollapse.expandAmount(banner.id()), btnHovered, true);
+            sbaddon$toggleHits.put(banner.id(), new int[]{btnX, btnY});
+
             String label = banner.label().getString();
             int textLeft = x + 20 + 4;
-            int textWidth = Math.max(0, right - textLeft - 2);
+            // 右侧留出按钮的位置，文字不要压到箭头上
+            int textWidth = Math.max(0, btnX - 3 - textLeft);
             if (font.width(label) > textWidth) {
                 label = font.plainSubstrByWidth(label, Math.max(0, textWidth - font.width("..."))) + "...";
             }
@@ -900,6 +948,15 @@ public abstract class BackpackScreenMixin {
     private void sbaddon$onClick(double mouseX, double mouseY, int button, CallbackInfoReturnable<Boolean> cir) {
         if (!sbaddon$applied || button != 0) {
             return;
+        }
+        // 横幅右端的展开/收起按钮优先：命中就吃掉这次点击，别让它落到下面的槽位上
+        for (Map.Entry<String, int[]> entry : sbaddon$toggleHits.entrySet()) {
+            int[] hit = entry.getValue();
+            if (ExpandCollapseButton.isOver(hit[0], hit[1], mouseX, mouseY)) {
+                ClassifyCollapse.toggle(entry.getKey());
+                cir.setReturnValue(true);
+                return;
+            }
         }
         int panelLeft = sbaddon$panelLeft();
         int tabTop = sbaddon$tabTop();

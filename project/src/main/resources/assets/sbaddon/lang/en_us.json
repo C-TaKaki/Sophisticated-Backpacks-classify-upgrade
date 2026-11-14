@@ -12,16 +12,5 @@
   "gui.sbaddon.classify.fallback": "Unclassified",
   "gui.sbaddon.classify.vanilla": "Vanilla",
   "gui.sbaddon.classify.row.empty": "Drop item here",
-  "gui.sbaddon.classify.auto": "Auto-classify",
-  "gui.sbaddon.toggle.expand": "Expand",
-  "gui.sbaddon.toggle.collapse": "Collapse",
-  "key.categories.sbaddon": "Sophisticated Backpacks Addon",
-  "key.sbaddon.toggle_demo": "Open expand/collapse button demo",
-  "screen.sbaddon.toggle_demo.title": "Expand / Collapse Toggle Button",
-  "screen.sbaddon.toggle_demo.panel_title": "Panel content",
-  "screen.sbaddon.toggle_demo.line1": "Width follows button progress",
-  "screen.sbaddon.toggle_demo.line2": "Content fades in with it",
-  "screen.sbaddon.toggle_demo.state_expanded": "State: expanded",
-  "screen.sbaddon.toggle_demo.state_collapsed": "State: collapsed",
-  "screen.sbaddon.toggle_demo.hint": "Click the button to toggle - ESC to close"
+  "gui.sbaddon.classify.auto": "Auto-classify"
 }

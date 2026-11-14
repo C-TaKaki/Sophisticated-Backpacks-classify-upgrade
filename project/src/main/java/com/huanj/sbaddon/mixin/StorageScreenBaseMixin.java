@@ -3,9 +3,12 @@ package com.huanj.sbaddon.mixin;
 import com.huanj.sbaddon.client.BannerBackground;
 import com.huanj.sbaddon.client.ClassifyTab;
 import com.huanj.sbaddon.client.ClassifyViewState;
+import com.huanj.sbaddon.client.layout.ClassifyCollapse;
 import com.huanj.sbaddon.client.layout.ClassifyGroups;
 import com.huanj.sbaddon.client.layout.ClassifyLayout;
+import com.huanj.sbaddon.client.layout.ClassifyMotion;
 import com.huanj.sbaddon.client.layout.SbClassifySource;
+import com.huanj.sbaddon.client.widget.ExpandCollapseButton;
 import com.huanj.sbaddon.compat.create.CreateAttributeFilterCompat;
 import com.huanj.sbaddon.upgrade.ClassifyUpgradeContainer;
 import net.minecraft.client.Minecraft;
@@ -67,6 +70,19 @@ public abstract class StorageScreenBaseMixin {
     @Unique
     private List<ClassifyLayout.Placement> sbaddon$placements = List.of();
 
+    /** 槽位 / 横幅的过渡动画（展开收起时让下面的组滑上来，而不是瞬移）。 */
+    @Unique
+    private final ClassifyMotion sbaddon$motion = new ClassifyMotion();
+    /** 横幅 id → 本帧的显示 y（含过渡偏移）。 */
+    @Unique
+    private final Map<String, Integer> sbaddon$bannerDrawY = new java.util.HashMap<>();
+    /** 横幅右侧展开按钮的命中区：id → {x, y}。绘制时写入，点击时读。 */
+    @Unique
+    private final Map<String, int[]> sbaddon$toggleHits = new java.util.HashMap<>();
+    /** 上一帧的滚动行，滚动时不播过渡动画（否则整片内容会"追"着滚）。 */
+    @Unique
+    private int sbaddon$lastMotionScroll = -1;
+
     /** 上一帧是否真的套用过分类布局（用来判断需不需要把槽位还给 SB）。 */
     @Unique
     private boolean sbaddon$layoutApplied;
@@ -85,6 +101,8 @@ public abstract class StorageScreenBaseMixin {
         sbaddon$banners = List.of();
         sbaddon$placements = List.of();
         sbaddon$maxScroll = 0;
+        sbaddon$bannerDrawY.clear();
+        sbaddon$toggleHits.clear();
 
         StorageScreenBase<?> self = (StorageScreenBase<?>) (Object) this;
         AbstractContainerMenu rawMenu = self.getMenu();
@@ -102,6 +120,7 @@ public abstract class StorageScreenBaseMixin {
                 sbaddon$originX = Integer.MIN_VALUE;
                 sbaddon$appliedSlot0X = Integer.MIN_VALUE;
                 sbaddon$scroll = 0;
+                sbaddon$motion.reset();
                 updateStorageSlotsPositions();
             }
             return;
@@ -133,30 +152,50 @@ public abstract class StorageScreenBaseMixin {
         Predicate<net.minecraft.world.item.ItemStack> filter = self.getStackFilter();
         SbClassifySource source = new SbClassifySource(menu, container);
         ClassifyLayout.Result result = ClassifyLayout.compute(
-                source, cols, rows, sbaddon$scroll, filter, sbaddon$originX, sbaddon$originY);
+                source, cols, rows, sbaddon$scroll, filter, ClassifyCollapse::isCollapsed,
+                sbaddon$originX, sbaddon$originY);
 
         sbaddon$maxScroll = Math.max(0, result.totalRows() - rows);
         if (sbaddon$scroll > sbaddon$maxScroll) {
             sbaddon$scroll = sbaddon$maxScroll;
             result = ClassifyLayout.compute(
-                    source, cols, rows, sbaddon$scroll, filter, sbaddon$originX, sbaddon$originY);
+                    source, cols, rows, sbaddon$scroll, filter, ClassifyCollapse::isCollapsed,
+                    sbaddon$originX, sbaddon$originY);
         }
 
+        // 滚动时内容整体平移，插值会变成"追着滚"的补偿动画 —— 直接丢缓存让它瞬间落位
+        if (sbaddon$scroll != sbaddon$lastMotionScroll) {
+            sbaddon$motion.reset();
+            sbaddon$lastMotionScroll = sbaddon$scroll;
+        }
+
+        sbaddon$motion.beginFrame();
         for (int i = 0; i < storageSlots; i++) {
             Slot slot = menu.getSlot(i);
             slot.x = SBADDON_HIDDEN;
             slot.y = SBADDON_HIDDEN;
         }
+        List<ClassifyLayout.Placement> animated = new java.util.ArrayList<>(result.placements().size());
         for (ClassifyLayout.Placement placement : result.placements()) {
             Slot slot = menu.getSlot(placement.slotIndex());
-            slot.x = placement.x();
-            slot.y = placement.y();
+            // 用插值后的显示坐标：展开/收起时物品是滑过去，不是跳过去
+            float[] pos = sbaddon$motion.slot(placement.slotIndex(), placement.x(), placement.y());
+            slot.x = Math.round(pos[0]);
+            slot.y = Math.round(pos[1]);
+            // 格子背景也按显示坐标画，否则动画期间物品会和格线错开
+            animated.add(new ClassifyLayout.Placement(placement.slotIndex(), slot.x, slot.y));
         }
+        sbaddon$bannerDrawY.clear();
+        for (ClassifyLayout.Banner banner : result.banners()) {
+            sbaddon$bannerDrawY.put(banner.id(),
+                    Math.round(sbaddon$motion.bannerY(banner.id(), banner.y())));
+        }
+        sbaddon$motion.endFrame();
 
         sbaddon$appliedSlot0X = slot0.x;
         sbaddon$appliedSlot0Y = slot0.y;
         sbaddon$banners = result.banners();
-        sbaddon$placements = result.placements();
+        sbaddon$placements = animated;
         sbaddon$layoutApplied = true;
     }
 
@@ -264,7 +303,8 @@ public abstract class StorageScreenBaseMixin {
             // 横幅这里同样外扩 1px，才会和整行格子的边框严丝合缝对齐；
             // 不外扩的话横幅会整体右移、下移 1px，视觉上就是"标签没对齐格子"。
             int x = left + banner.x() - 1;
-            int y = top + banner.y() - 1;
+            int drawY = sbaddon$bannerDrawY.getOrDefault(banner.id(), banner.y());
+            int y = top + drawY - 1;
             int right = x + banner.width();
             int inset = ClassifyLayout.BANNER_INSET;
             // 纯代码绘制的像素横幅底（原图 25×25，中间横向平铺），四边各向内缩 3px
@@ -282,14 +322,43 @@ public abstract class StorageScreenBaseMixin {
                 graphics.renderItem(banner.icon(), 0, 0);
                 graphics.pose().popPose();
             }
-            // 模组名过长时按剩余宽度截断加省略号，不让文字冲出横幅
+            // 横幅右端的展开/收起按钮：16×16 贴图在 18px 高的横幅里垂直居中
+            int btnX = right - ExpandCollapseButton.SIZE - 2;
+            int btnY = y + (ClassifyLayout.CELL - ExpandCollapseButton.SIZE) / 2;
+            boolean btnHovered = ExpandCollapseButton.isOver(btnX, btnY, mouseX, mouseY);
+            ExpandCollapseButton.render(graphics, btnX, btnY,
+                    ClassifyCollapse.expandAmount(banner.id()), btnHovered, true);
+            sbaddon$toggleHits.put(banner.id(), new int[]{btnX, btnY});
+
+            // 模组名过长时按剩余宽度截断加省略号，不让文字冲出横幅（右侧要留出按钮的位置）
             String label = banner.label().getString();
             int textLeft = x + 20 + ICON_TEXT_SHIFT;
-            int textWidth = Math.max(0, right - textLeft - 2);
+            int textWidth = Math.max(0, btnX - 3 - textLeft);
             if (font.width(label) > textWidth) {
                 label = font.plainSubstrByWidth(label, Math.max(0, textWidth - font.width("..."))) + "...";
             }
             graphics.drawString(font, label, textLeft, y + 5, 0xFF1D2433, false);
+        }
+    }
+
+    /**
+     * 横幅右端的展开/收起按钮。命中就吃掉这次点击，避免穿透到下面的槽位。
+     * <p>
+     * 命中区是上一帧渲染时写下的（{@code sbaddon$toggleHits}），坐标已经是屏幕坐标。
+     */
+    @Inject(method = "mouseClicked", at = @At("HEAD"), cancellable = true)
+    private void sbaddon$toggleGroup(double mouseX, double mouseY, int button,
+                                     CallbackInfoReturnable<Boolean> cir) {
+        if (button != 0 || sbaddon$toggleHits.isEmpty()) {
+            return;
+        }
+        for (Map.Entry<String, int[]> entry : sbaddon$toggleHits.entrySet()) {
+            int[] hit = entry.getValue();
+            if (ExpandCollapseButton.isOver(hit[0], hit[1], mouseX, mouseY)) {
+                ClassifyCollapse.toggle(entry.getKey());
+                cir.setReturnValue(true);
+                return;
+            }
         }
     }
 
