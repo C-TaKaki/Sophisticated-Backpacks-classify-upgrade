@@ -21,6 +21,6 @@ project/src/generated/resources/.cache/
 project/quickplay.txt
 # 本地暂存（旧产物，等用户手动清空）
 .trash/
-新建 易程序.e
 run-client.bat
 run.exe
+run.e
