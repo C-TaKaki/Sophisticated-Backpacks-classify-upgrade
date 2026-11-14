@@ -39,6 +39,12 @@ public final class ClassifyLayout {
     /** 横幅贴图四边向内缩进的像素数（0 = 不缩，铺满整行）。 */
     public static final int BANNER_INSET = 0;
 
+    /**
+     * 横幅图标相对 16×16 原图的缩放。两个背包侧共用，改这里就同时生效。
+     * 0.85 → 13.6px，在 18px 高的横幅里上下各留 2.2px，垂直居中。
+     */
+    public static final float BANNER_ICON_SCALE = 0.85F;
+
     private ClassifyLayout() {
     }
 

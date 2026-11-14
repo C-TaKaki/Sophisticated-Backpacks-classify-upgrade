@@ -515,11 +515,13 @@ public abstract class BackpackScreenMixin {
             BannerBackground.render(graphics, x, y, banner.width(), boxH);
 
             if (!banner.icon().isEmpty()) {
-                float iconSize = 16.0f * 0.9f;
+                // 与精妙背包侧同一套缩放 / 居中算法（ClassifyLayout.BANNER_ICON_SCALE）
+                float scale = ClassifyLayout.BANNER_ICON_SCALE;
+                float iconSize = 16.0f * scale;
                 float offset = (ClassifyLayout.CELL - iconSize) / 2.0f + 4;
                 graphics.pose().pushPose();
                 graphics.pose().translate(x + offset, y + (ClassifyLayout.CELL - iconSize) / 2.0f, 0.0f);
-                graphics.pose().scale(0.9f, 0.9f, 1.0f);
+                graphics.pose().scale(scale, scale, 1.0f);
                 graphics.renderItem(banner.icon(), 0, 0);
                 graphics.pose().popPose();
             }

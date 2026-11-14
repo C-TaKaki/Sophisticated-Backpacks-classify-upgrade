@@ -327,13 +327,14 @@ public abstract class StorageScreenBaseMixin {
             int boxH = ClassifyLayout.CELL - inset * 2;
             BannerBackground.render(graphics, x + inset, y + inset, boxW, boxH);
             if (!banner.icon().isEmpty()) {
-                // 图标缩小 10% 后在 18×18 格子里水平垂直居中（16×0.9=14.4，两侧各留 1.8），
-                // 再整体右移 10px，和文字一起往内让出左边距
-                float iconSize = 16.0f * 0.9f;
+                // 图标按 BANNER_ICON_SCALE 缩放后在 18×18 格子里水平垂直居中
+                // （16×0.85=13.6，上下各留 2.2），再整体右移，和文字一起往内让出左边距
+                float scale = ClassifyLayout.BANNER_ICON_SCALE;
+                float iconSize = 16.0f * scale;
                 float offset = (ClassifyLayout.CELL - iconSize) / 2.0f + ICON_TEXT_SHIFT;
                 graphics.pose().pushPose();
                 graphics.pose().translate(x + offset, y + (ClassifyLayout.CELL - iconSize) / 2.0f, 0.0f);
-                graphics.pose().scale(0.9f, 0.9f, 1.0f);
+                graphics.pose().scale(scale, scale, 1.0f);
                 graphics.renderItem(banner.icon(), 0, 0);
                 graphics.pose().popPose();
             }
