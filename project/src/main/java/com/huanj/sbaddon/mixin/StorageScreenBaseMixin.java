@@ -178,10 +178,18 @@ public abstract class StorageScreenBaseMixin {
         List<ClassifyLayout.Placement> animated = new java.util.ArrayList<>(result.placements().size());
         for (ClassifyLayout.Placement placement : result.placements()) {
             Slot slot = menu.getSlot(placement.slotIndex());
-            // 用插值后的显示坐标：展开/收起时物品是滑过去，不是跳过去
-            float[] pos = sbaddon$motion.slot(placement.slotIndex(), placement.x(), placement.y());
-            slot.x = Math.round(pos[0]);
-            slot.y = Math.round(pos[1]);
+            if (!slot.hasItem()) {
+                // 空槽只是网格背景：不参与过渡，瞬间落到目标位置。
+                // 否则折叠时下面那一大片空格子会整体滑过来，看起来就是"贴图在一大块一大块地动"。
+                sbaddon$motion.drop(placement.slotIndex());
+                slot.x = placement.x();
+                slot.y = placement.y();
+            } else {
+                // 有物品的槽才插值：展开/收起时物品是滑过去，不是跳过去
+                float[] pos = sbaddon$motion.slot(placement.slotIndex(), placement.x(), placement.y());
+                slot.x = Math.round(pos[0]);
+                slot.y = Math.round(pos[1]);
+            }
             // 格子背景也按显示坐标画，否则动画期间物品会和格线错开
             animated.add(new ClassifyLayout.Placement(placement.slotIndex(), slot.x, slot.y));
         }

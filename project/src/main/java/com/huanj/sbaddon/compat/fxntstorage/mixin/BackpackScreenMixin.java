@@ -342,10 +342,18 @@ public abstract class BackpackScreenMixin {
         List<ClassifyLayout.Placement> animated = new ArrayList<>(result.placements().size());
         for (ClassifyLayout.Placement placement : result.placements()) {
             Slot slot = menu.getSlot(placement.slotIndex());
-            // 用插值后的显示坐标：展开/收起时物品滑过去，不是瞬移
-            float[] pos = sbaddon$motion.slot(placement.slotIndex(), placement.x(), placement.y());
-            slot.x = Math.round(pos[0]);
-            slot.y = Math.round(pos[1]);
+            if (!slot.hasItem()) {
+                // 空槽只是网格背景，不参与过渡：让格子瞬间落位，
+                // 否则折叠/展开时下面那一大片空格子会整体滑动，看起来就是贴图在大块大块地动
+                sbaddon$motion.drop(placement.slotIndex());
+                slot.x = placement.x();
+                slot.y = placement.y();
+            } else {
+                // 有物品的槽才插值：展开/收起时物品滑过去，不是瞬移
+                float[] pos = sbaddon$motion.slot(placement.slotIndex(), placement.x(), placement.y());
+                slot.x = Math.round(pos[0]);
+                slot.y = Math.round(pos[1]);
+            }
             // 格子贴图也按显示坐标平铺，动画期间不会和物品错开
             animated.add(new ClassifyLayout.Placement(placement.slotIndex(), slot.x, slot.y));
         }

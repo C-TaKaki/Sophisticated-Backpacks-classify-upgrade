@@ -64,6 +64,16 @@ public final class ClassifyMotion {
         return pos[0];
     }
 
+    /**
+     * 丢掉某个槽位的动画缓存，下次出现时直接落位。
+     * <p>
+     * 空槽位用它：空槽只是网格背景，跟着一起滑动只会让"一大片格子整体漂移"，
+     * 反而看不出物品在移动。物品槽才需要过渡。
+     */
+    public void drop(int slotIndex) {
+        slots.remove(slotIndex);
+    }
+
     public void endFrame() {
         slots.keySet().removeIf(index -> !seenSlots.contains(index));
         banners.keySet().removeIf(id -> !seenBanners.contains(id));
