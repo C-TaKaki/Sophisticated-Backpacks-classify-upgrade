@@ -117,6 +117,23 @@ public abstract class BackpackScreenMixin {
     private static final int SBADDON_AUTO_W = 44;
     @Unique
     private static final int SBADDON_AUTO_H = 12;
+
+    /** FXNT 页签尺寸（PANEL_TAB_WIDTH / PANEL_TAB_HEIGHT），和我们自己的页签按钮保持一致。 */
+    @Unique
+    private static final int SBADDON_TAB_W = 18;
+    @Unique
+    private static final int SBADDON_TAB_H = 20;
+    /** FXNT 的 UI 图集，收起态页签底图在 (0, 47)、24×24。 */
+    @Unique
+    private static final ResourceLocation SBADDON_TAB_TEXTURE =
+            ResourceLocation.fromNamespaceAndPath("fxntstorage", "textures/gui/atlas.png");
+    /** 原版按钮贴图：FXNT 的页签就是 Button 控件，用同一套 sprite 才长得一样。 */
+    @Unique
+    private static final ResourceLocation SBADDON_TAB_BUTTON =
+            ResourceLocation.withDefaultNamespace("widget/button");
+    @Unique
+    private static final ResourceLocation SBADDON_TAB_BUTTON_HOVERED =
+            ResourceLocation.withDefaultNamespace("widget/button_highlighted");
     /** 改名输入框内文字相对边框的内缩（也是 EditBox 控件矩形相对边框的偏移）。 */
     @Unique
     private static final int SBADDON_TEXT_INSET = 4;
@@ -273,6 +290,14 @@ public abstract class BackpackScreenMixin {
     @Shadow
     @Final
     private List<?> upgradePanels;
+
+    /** 反射读 {@code PanelState.expanded} / {@code PanelState.panel} / {@code UpgradePanel#getExpandedHeight}。 */
+    @Unique
+    private static java.lang.reflect.Field sbaddon$psExpandedField;
+    @Unique
+    private static java.lang.reflect.Field sbaddon$psPanelField;
+    @Unique
+    private static java.lang.reflect.Method sbaddon$expandedHeightMethod;
 
     /** 当前界面配置能显示的行数（4 / 7 / 9 档里实际用于物品区的行数）。 */
     @Shadow
@@ -577,7 +602,46 @@ public abstract class BackpackScreenMixin {
 
     @Unique
     private int sbaddon$tabTop() {
-        return sbaddon$self().getGuiTop() + 5 + 24 * upgradePanels.size();
+        BackpackScreen self = sbaddon$self();
+        int y = self.getGuiTop() + 5 + 24 * upgradePanels.size();
+        // FXNT 的 repositionTabs 会把「展开的面板」下面所有页签整体下推 expandedHeight - 24。
+        // 我们的页签排在最后，就得吃下前面每个展开面板的这份偏移，否则会压在上面那个展开的面板上。
+        for (Object state : upgradePanels) {
+            y += sbaddon$expandedShift(state);
+        }
+        return y;
+    }
+
+    /** 该页签展开时给后续页签的额外下移量；未展开 / 读不到就是 0。 */
+    @Unique
+    private static int sbaddon$expandedShift(Object panelState) {
+        if (panelState == null) {
+            return 0;
+        }
+        try {
+            if (sbaddon$psExpandedField == null) {
+                sbaddon$psExpandedField = panelState.getClass().getDeclaredField("expanded");
+                sbaddon$psExpandedField.setAccessible(true);
+            }
+            if (!sbaddon$psExpandedField.getBoolean(panelState)) {
+                return 0;
+            }
+            if (sbaddon$psPanelField == null) {
+                sbaddon$psPanelField = panelState.getClass().getDeclaredField("panel");
+                sbaddon$psPanelField.setAccessible(true);
+            }
+            Object panel = sbaddon$psPanelField.get(panelState);
+            if (panel == null) {
+                return 0;
+            }
+            if (sbaddon$expandedHeightMethod == null) {
+                sbaddon$expandedHeightMethod = panel.getClass().getMethod("getExpandedHeight");
+            }
+            return ((Number) sbaddon$expandedHeightMethod.invoke(panel)).intValue() - 24;
+        } catch (Throwable ignored) {
+            // FXNT 改内部结构时降级成"不偏移"，界面顶多叠一次，不会崩
+            return 0;
+        }
     }
 
     @Unique
@@ -701,10 +765,14 @@ public abstract class BackpackScreenMixin {
         sbaddon$cancelHit = null;
 
         if (!sbaddon$panelOpen) {
-            // 收起态：一个凸起的小页签，里面是升级物品图标
-            sbaddon$drawRaised(graphics, panelLeft, tabTop, 20, 20, false);
-            GuiHelper.renderSlotsBackground(graphics, panelLeft + 1, tabTop + 1, 1, 1);
-            graphics.renderItem(upgradeIcon, panelLeft + 2, tabTop + 2);
+            // 和 FXNT 自己的页签同款画法：底层 24×24 页签贴图（atlas 的 u0/v47）+ 原版 18×20 按钮 + 居中图标。
+            // FXNT 的页签按钮就是 {@code Button} 控件，这里直接套同一套 widget 贴图，视觉上一模一样。
+            graphics.blit(SBADDON_TAB_TEXTURE, panelLeft - 3, tabTop - 2, 0.0F, 47.0F, 24, 24, 256, 256);
+            boolean tabHovered = sbaddon$inside(mouseX, mouseY, panelLeft, tabTop,
+                    SBADDON_TAB_W, SBADDON_TAB_H);
+            graphics.blitSprite(tabHovered ? SBADDON_TAB_BUTTON_HOVERED : SBADDON_TAB_BUTTON,
+                    panelLeft, tabTop, SBADDON_TAB_W, SBADDON_TAB_H);
+            graphics.renderItem(upgradeIcon, panelLeft + 1, tabTop + 2);
             return;
         }
 
@@ -876,16 +944,6 @@ public abstract class BackpackScreenMixin {
         graphics.fill(x, y + h - 1, x + w, y + h, SBADDON_COLOR_ROW_SH);
     }
 
-    /** 凸起方块（收起态页签用）。 */
-    @Unique
-    private void sbaddon$drawRaised(GuiGraphics graphics, int x, int y, int w, int h, boolean hovered) {
-        graphics.fill(x, y, x + w, y + h, hovered ? 0xFFB0B0B0 : 0xFFC6C6C6);
-        graphics.fill(x, y, x + w, y + 1, 0xFFFFFFFF);
-        graphics.fill(x, y, x + 1, y + h, 0xFFFFFFFF);
-        graphics.fill(x, y + h - 1, x + w, y + h, 0xFF555555);
-        graphics.fill(x + w - 1, y, x + w, y + h, 0xFF555555);
-    }
-
     /** 拖拽手柄：三条横线，和精妙背包的 drawHandle 同参数。 */
     @Unique
     private void sbaddon$drawHandle(GuiGraphics graphics, int x, int y, int h, boolean active) {
@@ -1020,7 +1078,7 @@ public abstract class BackpackScreenMixin {
         int tabTop = sbaddon$tabTop();
 
         // 页签按钮
-        if (sbaddon$inside(mouseX, mouseY, panelLeft, tabTop, 20, 20)) {
+        if (sbaddon$inside(mouseX, mouseY, panelLeft, tabTop, SBADDON_TAB_W, SBADDON_TAB_H)) {
             sbaddon$panelOpen = !sbaddon$panelOpen;
             sbaddon$stopEditing(false);
             sbaddon$cancelDrag();
