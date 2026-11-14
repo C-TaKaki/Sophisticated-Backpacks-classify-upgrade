@@ -19,3 +19,5 @@ project/src/generated/resources/.cache/
 
 # 启动脚本临时状态（-QuickPlay 写入）
 project/quickplay.txt
+# 本地暂存（旧产物，等用户手动清空）
+.trash/
