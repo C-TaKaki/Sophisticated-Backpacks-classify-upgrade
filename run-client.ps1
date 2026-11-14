@@ -1,4 +1,4 @@
-# Sync external mods, then launch the NeoForge dev client (game dir: project\run).
+﻿# Sync external mods, then launch the NeoForge dev client (game dir: project\run).
 # 关闭游戏窗口后会把本局启动的 JVM / Gradle 守护进程一并清理干净，脚本返回时不留后台进程。
 # 用法：run-client.ps1 [-QuickPlay "存档名"] [-NoQuickPlay]
 #   -QuickPlay   指定存档；不给则自动进「最近修改过的存档」

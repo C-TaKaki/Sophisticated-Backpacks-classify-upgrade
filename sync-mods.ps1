@@ -1,4 +1,4 @@
-# Sync every external mod jar into the dev run directories:
+﻿# Sync every external mod jar into the dev run directories:
 #   - HuanJ\libs                (prerequisite mods: Sophisticated Backpacks / Core / AnvilLib ...)
 #   - sibling folders of HuanJ that contain .jar files  (e.g. the "add these mods" folder)
 # Targets: project\run\mods  and  project\run-server\mods

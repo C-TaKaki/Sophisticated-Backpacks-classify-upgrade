@@ -1,4 +1,4 @@
-# Sync external mods, then launch the NeoForge dev server (game dir: project\run-server)
+﻿# Sync external mods, then launch the NeoForge dev server (game dir: project\run-server)
 $ErrorActionPreference = 'Stop'
 $root = $PSScriptRoot
 & (Join-Path $root 'sync-mods.ps1')

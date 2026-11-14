@@ -1,4 +1,4 @@
-# Build the mod jar. Output: project/build/libs/*.jar and HuanJ/dist/*.jar
+﻿# Build the mod jar. Output: project/build/libs/*.jar and HuanJ/dist/*.jar
 $ErrorActionPreference = 'Stop'
 $root = $PSScriptRoot
 $env:JAVA_HOME = Join-Path $root 'tools\jdk21'
