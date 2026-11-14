@@ -24,7 +24,8 @@ import java.util.List;
  * 客户端没有任何写权限：所有增删改都发到这个包，由服务端改升级物品的 CUSTOM_DATA，
  * 再走背包菜单自带的槽位同步回客户端。这样多人游戏下不会出现两端各改各的。
  */
-public record FxntClassifyAction(int action, int index, int dir, String groupId, String name)
+public record FxntClassifyAction(int action, int index, int dir, String groupId, String name,
+                                 ItemStack stack)
         implements CustomPacketPayload {
 
     public static final int ACTION_AUTO = 0;
@@ -33,7 +34,12 @@ public record FxntClassifyAction(int action, int index, int dir, String groupId,
     public static final int ACTION_RENAME = 3;
     /** 拖拽排序：index = 源行，dir = 目标行。 */
     public static final int ACTION_REORDER = 4;
-    /** 拖入物品新增分类：groupId 字段携带物品注册名。 */
+    /**
+     * 拖入物品新增分类。
+     * <p>
+     * 必须连整只 {@link ItemStack} 一起发：只发注册名的话 Create 属性过滤器会变成一只**空过滤器**
+     * （属性条目全在组件里），加进去也解析不出谓词，分类等于没加。
+     */
     public static final int ACTION_ADD = 5;
 
     public static final Type<FxntClassifyAction> TYPE =
@@ -46,31 +52,36 @@ public record FxntClassifyAction(int action, int index, int dir, String groupId,
                     ByteBufCodecs.VAR_INT, FxntClassifyAction::dir,
                     ByteBufCodecs.STRING_UTF8, FxntClassifyAction::groupId,
                     ByteBufCodecs.STRING_UTF8, FxntClassifyAction::name,
+                    ItemStack.OPTIONAL_STREAM_CODEC, FxntClassifyAction::stack,
                     FxntClassifyAction::new);
 
     public static FxntClassifyAction auto() {
-        return new FxntClassifyAction(ACTION_AUTO, 0, 0, "", "");
+        return new FxntClassifyAction(ACTION_AUTO, 0, 0, "", "", ItemStack.EMPTY);
     }
 
     public static FxntClassifyAction remove(int index) {
-        return new FxntClassifyAction(ACTION_REMOVE, index, 0, "", "");
+        return new FxntClassifyAction(ACTION_REMOVE, index, 0, "", "", ItemStack.EMPTY);
     }
 
     public static FxntClassifyAction move(int index, int dir) {
-        return new FxntClassifyAction(ACTION_MOVE, index, dir, "", "");
+        return new FxntClassifyAction(ACTION_MOVE, index, dir, "", "", ItemStack.EMPTY);
     }
 
     public static FxntClassifyAction reorder(int from, int to) {
-        return new FxntClassifyAction(ACTION_REORDER, from, to, "", "");
+        return new FxntClassifyAction(ACTION_REORDER, from, to, "", "", ItemStack.EMPTY);
     }
 
-    public static FxntClassifyAction add(String itemId) {
-        return new FxntClassifyAction(ACTION_ADD, 0, 0, itemId == null ? "" : itemId, "");
+    /** 新增分类：带整只样本（属性过滤器的属性条目在组件里，只发名字会丢）。 */
+    public static FxntClassifyAction add(ItemStack sample) {
+        if (sample == null || sample.isEmpty()) {
+            return new FxntClassifyAction(ACTION_ADD, 0, 0, "", "", ItemStack.EMPTY);
+        }
+        return new FxntClassifyAction(ACTION_ADD, 0, 0, "", "", sample.copyWithCount(1));
     }
 
     public static FxntClassifyAction rename(String groupId, String name) {
         return new FxntClassifyAction(ACTION_RENAME, 0, 0, groupId == null ? "" : groupId,
-                name == null ? "" : name);
+                name == null ? "" : name, ItemStack.EMPTY);
     }
 
     @Override
@@ -113,16 +124,10 @@ public record FxntClassifyAction(int action, int index, int dir, String groupId,
                     samples.add(target, moved);
                 }
                 case ACTION_ADD -> {
-                    ResourceLocation itemId = ResourceLocation.tryParse(groupId);
-                    if (itemId == null) {
+                    if (stack.isEmpty()) {
                         return;
                     }
-                    net.minecraft.world.item.Item item =
-                            net.minecraft.core.registries.BuiltInRegistries.ITEM.get(itemId);
-                    if (item == net.minecraft.world.item.Items.AIR) {
-                        return;
-                    }
-                    samples = FxntClassifyData.addSample(samples, new ItemStack(item));
+                    samples = FxntClassifyData.addSample(samples, stack);
                 }
                 case ACTION_REORDER -> {
                     if (index < 0 || index >= samples.size() || dir < 0 || dir >= samples.size()

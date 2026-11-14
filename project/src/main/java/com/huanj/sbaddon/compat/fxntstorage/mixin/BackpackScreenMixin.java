@@ -7,6 +7,7 @@ import com.huanj.sbaddon.client.layout.ClassifyLayout;
 import com.huanj.sbaddon.client.layout.ClassifyMotion;
 import com.huanj.sbaddon.client.layout.ClassifySource;
 import com.huanj.sbaddon.client.widget.ExpandCollapseButton;
+import com.huanj.sbaddon.compat.create.CreateAttributeFilterCompat;
 import com.huanj.sbaddon.compat.fxntstorage.FxntClassifyData;
 import com.huanj.sbaddon.compat.fxntstorage.FxntClassifyMenu;
 import com.huanj.sbaddon.compat.fxntstorage.FxntCompatContent;
@@ -149,6 +150,9 @@ public abstract class BackpackScreenMixin {
     private List<ClassifyLayout.Banner> sbaddon$banners = List.of();
     @Unique
     private List<ClassifyLayout.Placement> sbaddon$placements = List.of();
+    /** 只补格子背景、不挂槽位的位置（背包没有空槽可用时把分类的块铺满）。 */
+    @Unique
+    private List<ClassifyLayout.Cell> sbaddon$cells = List.of();
     /** 槽位 / 横幅的过渡动画（展开收起时下面的组滑上来）。 */
     @Unique
     private final ClassifyMotion sbaddon$motion = new ClassifyMotion();
@@ -285,6 +289,7 @@ public abstract class BackpackScreenMixin {
         // 每帧先清空：升级被拿掉时这里提前 return，留着上一帧的布局会让横幅/格子残留
         sbaddon$banners = List.of();
         sbaddon$placements = List.of();
+        sbaddon$cells = List.of();
         sbaddon$maxScroll = 0;
         sbaddon$bannerDrawY.clear();
         sbaddon$toggleHits.clear();
@@ -366,6 +371,7 @@ public abstract class BackpackScreenMixin {
 
         sbaddon$banners = result.banners();
         sbaddon$placements = animated;
+        sbaddon$cells = result.cells();
         sbaddon$applied = true;
     }
 
@@ -442,10 +448,16 @@ public abstract class BackpackScreenMixin {
      */
     @Unique
     private void sbaddon$blitCells(GuiGraphics graphics, int left, int top) {
-        if (sbaddon$placements.isEmpty()) {
+        if (sbaddon$placements.isEmpty() && sbaddon$cells.isEmpty()) {
             return;
         }
         ResourceLocation texture = sbaddon$cellTexture();
+        // 没有空槽可用的空格也要贴格子，分类的块才是完整矩形
+        for (ClassifyLayout.Cell cell : sbaddon$cells) {
+            graphics.blit(texture, left + cell.x() - 1, top + cell.y() - 1,
+                    SBADDON_CELL_TEX_U, SBADDON_CELL_TEX_V, SBADDON_CELL, SBADDON_CELL,
+                    SBADDON_CELL_TEX_W, sbaddon$cellTextureHeight);
+        }
         for (ClassifyLayout.Placement placement : sbaddon$placements) {
             // placement 是「物品」坐标，贴图格子比它左上各多 1px
             // 注意用 9 参数重载：7 参数版本默认按 256×256 算 UV，这张贴图是 282×{225,281,317}，
@@ -515,6 +527,46 @@ public abstract class BackpackScreenMixin {
                 label = font.plainSubstrByWidth(label, Math.max(0, textWidth - font.width("..."))) + "...";
             }
             graphics.drawString(font, label, textLeft, y + 5, 0xFF1D2433, false);
+        }
+    }
+
+    /**
+     * 面板行的 tooltip，行为和精妙背包那边的样本槽一致：
+     * 属性过滤器直接显示 Create 自己的摘要（匹配模式 + 每条属性），普通样本显示分类名。
+     * 悬停整行都算，不用精确指到图标。
+     */
+    @Inject(method = "render", at = @At("TAIL"))
+    private void sbaddon$rowTooltip(GuiGraphics graphics, int mouseX, int mouseY, float partialTick,
+                                    CallbackInfo ci) {
+        if (!sbaddon$applied || !sbaddon$panelOpen || sbaddon$editingRow >= 0) {
+            return;
+        }
+        int panelLeft = sbaddon$panelLeft();
+        int panelTop = sbaddon$panelTop();
+        if (!sbaddon$inside(mouseX, mouseY, panelLeft, panelTop, SBADDON_PANEL_W, SBADDON_PANEL_H)) {
+            return;
+        }
+        List<ItemStack> samples = sbaddon$samples();
+        for (int[] hit : sbaddon$rowHits) {
+            // 布局：{行号, x, y, w, h, 手柄x, 删除x, 改名x}
+            if (!sbaddon$inside(mouseX, mouseY, hit[1], hit[2], hit[3], hit[4])) {
+                continue;
+            }
+            int row = hit[0];
+            if (row < 0 || row >= samples.size()) {
+                return;
+            }
+            ItemStack sample = samples.get(row);
+            if (sample.isEmpty()) {
+                return;
+            }
+            List<Component> summary = CreateAttributeFilterCompat.summary(sample);
+            List<Component> lines = summary != null
+                    ? summary
+                    : List.of(ClassifyGroups.describe(sample, sbaddon$snapshot.names()).label());
+            graphics.renderTooltip(Minecraft.getInstance().font, lines,
+                    java.util.Optional.empty(), mouseX, mouseY);
+            return;
         }
     }
 
@@ -1034,8 +1086,7 @@ public abstract class BackpackScreenMixin {
         ItemStack carried = sbaddon$self().getMenu().getCarried();
         if (!carried.isEmpty() && sbaddon$inside(mouseX, mouseY,
                 sbaddon$rowX() + 1, sbaddon$footerTop(), SBADDON_CELL, SBADDON_ROW_FILL_H)) {
-            sbaddon$send(FxntClassifyAction.add(
-                    BuiltInRegistries.ITEM.getKey(carried.getItem()).toString()));
+            sbaddon$send(FxntClassifyAction.add(carried));
             sbaddon$rowY.clear();
             return;
         }

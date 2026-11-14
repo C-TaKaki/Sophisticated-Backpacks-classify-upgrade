@@ -69,6 +69,9 @@ public abstract class StorageScreenBaseMixin {
     private List<ClassifyLayout.Banner> sbaddon$banners = List.of();
     @Unique
     private List<ClassifyLayout.Placement> sbaddon$placements = List.of();
+    /** 只补格子背景、不挂槽位的位置（背包没有空槽可用时把分类的块铺满）。 */
+    @Unique
+    private List<ClassifyLayout.Cell> sbaddon$cells = List.of();
 
     /** 槽位 / 横幅的过渡动画（展开收起时让下面的组滑上来，而不是瞬移）。 */
     @Unique
@@ -100,6 +103,7 @@ public abstract class StorageScreenBaseMixin {
         // 留着上一帧的布局会导致 SB 的格子背景被取消绘制，界面上出现空白行
         sbaddon$banners = List.of();
         sbaddon$placements = List.of();
+        sbaddon$cells = List.of();
         sbaddon$maxScroll = 0;
         sbaddon$bannerDrawY.clear();
         sbaddon$toggleHits.clear();
@@ -204,6 +208,7 @@ public abstract class StorageScreenBaseMixin {
         sbaddon$appliedSlot0Y = slot0.y;
         sbaddon$banners = result.banners();
         sbaddon$placements = animated;
+        sbaddon$cells = result.cells();
         sbaddon$layoutApplied = true;
     }
 
@@ -236,12 +241,16 @@ public abstract class StorageScreenBaseMixin {
     @Inject(method = "renderBg", at = @At("TAIL"))
     private void sbaddon$drawAlignedSlotBg(GuiGraphics graphics, float partialTick, int mouseX, int mouseY,
                                            CallbackInfo ci) {
-        if (sbaddon$placements.isEmpty()) {
+        if (sbaddon$placements.isEmpty() && sbaddon$cells.isEmpty()) {
             return;
         }
         StorageScreenBase<?> self = (StorageScreenBase<?>) (Object) this;
         int left = self.getGuiLeft();
         int top = self.getGuiTop();
+        for (ClassifyLayout.Cell cell : sbaddon$cells) {
+            net.p3pp3rf1y.sophisticatedcore.client.gui.utils.GuiHelper.renderSlotsBackground(
+                    graphics, left + cell.x() - 1, top + cell.y() - 1, 1, 1);
+        }
         for (ClassifyLayout.Placement placement : sbaddon$placements) {
             // 槽位坐标天然比格子边框内缩 1px，这里补回去
             net.p3pp3rf1y.sophisticatedcore.client.gui.utils.GuiHelper.renderSlotsBackground(

@@ -47,14 +47,18 @@ public final class ClassifyLayout {
     public record Placement(int slotIndex, int x, int y) {
     }
 
-    public record Result(List<Banner> banners, List<Placement> placements, int totalRows) {
+    /** 只画格子背景、不挂槽位的位置（背包里没有空槽可用时用来把分类的块补齐）。 */
+    public record Cell(int x, int y) {
+    }
+
+    public record Result(List<Banner> banners, List<Placement> placements, List<Cell> cells, int totalRows) {
         public static Result empty() {
-            return new Result(List.of(), List.of(), 0);
+            return new Result(List.of(), List.of(), List.of(), 0);
         }
     }
 
     /** 行内未被物品占用的单元格（y 是相对内容顶部的像素坐标），用来摆放空槽。 */
-    private record Cell(int y, int col) {
+    private record Gap(int y, int col) {
     }
 
     /**
@@ -128,7 +132,8 @@ public final class ClassifyLayout {
         // 所以"跟随背包自带排序"是自然成立的。
         List<Banner> banners = new ArrayList<>();
         List<Placement> placements = new ArrayList<>();
-        List<Cell> gaps = new ArrayList<>();
+        List<Cell> cells = new ArrayList<>();
+        List<Gap> gaps = new ArrayList<>();
 
         int row = 0;
         for (ClassifyGroup group : groups) {
@@ -177,16 +182,20 @@ public final class ClassifyLayout {
         int scrollPx = scrollRows * CELL;
         int viewHeight = rows * CELL;
 
-        // 1) 先用空槽填满内容行内的空格，让每个可见格子都能放东西
+        // 1) 先用空槽填满内容行内的空格，让每个可见格子都能放东西。
+        //    空槽用完之后剩下的空格只补格子背景（cells）—— 背包塞满时分类的块也要是完整矩形，
+        //    否则每个分类末尾都缺一块，看起来像"没铺满"。
         int cursor = 0;
-        for (Cell gap : gaps) {
-            if (cursor >= emptySlots.size()) {
-                break;
-            }
-            int slotIndex = emptySlots.get(cursor++);
+        for (Gap gap : gaps) {
             int y = gap.y() - scrollPx;
-            if (y >= 0 && y < viewHeight) {
+            if (y < 0 || y >= viewHeight) {
+                continue;
+            }
+            if (cursor < emptySlots.size()) {
+                int slotIndex = emptySlots.get(cursor++);
                 placements.add(new Placement(slotIndex, originX + gap.col() * CELL, originY + y));
+            } else {
+                cells.add(new Cell(originX + gap.col() * CELL, originY + y));
             }
         }
 
@@ -208,7 +217,7 @@ public final class ClassifyLayout {
         int totalHeight = contentY + (tailCol > 0 ? CELL : 0);
         int totalRows = (totalHeight + CELL - 1) / CELL;
 
-        return new Result(banners, placements, totalRows);
+        return new Result(banners, placements, cells, totalRows);
     }
 
     /**
@@ -244,7 +253,7 @@ public final class ClassifyLayout {
     private static int placeGroup(int y, int cols, int rows, int scrollRows, Component label, ItemStack icon,
                                   List<Integer> items, boolean collapsed, String groupId,
                                   int originX, int originY,
-                                  List<Banner> banners, List<Placement> placements, List<Cell> gaps) {
+                                  List<Banner> banners, List<Placement> placements, List<Gap> gaps) {
         int scrollPx = scrollRows * CELL;
         int viewHeight = rows * CELL;
 
@@ -264,7 +273,7 @@ public final class ClassifyLayout {
             int c = k % cols;
             if (k >= items.size()) {
                 // 该行剩余空格：先记下来，稍后用空槽填
-                gaps.add(new Cell(cellY, c));
+                gaps.add(new Gap(cellY, c));
                 continue;
             }
             int viewY = cellY - scrollPx;

@@ -1,5 +1,6 @@
 package com.huanj.sbaddon.compat.fxntstorage;
 
+import com.huanj.sbaddon.compat.create.CreateAttributeFilterCompat;
 import com.huanj.sbaddon.upgrade.ClassifyUpgradeWrapper;
 import net.minecraft.core.HolderLookup;
 import net.minecraft.core.component.DataComponents;
@@ -152,24 +153,39 @@ public final class FxntClassifyData {
      */
     public static List<ItemStack> addSample(List<ItemStack> existing, ItemStack stack) {
         List<ItemStack> result = new ArrayList<>(existing);
-        if (stack.isEmpty() || result.size() >= SAMPLE_LIMIT) {
+        if (stack == null || stack.isEmpty() || result.size() >= SAMPLE_LIMIT) {
             return result;
         }
-        net.minecraft.resources.ResourceLocation key =
-                net.minecraft.core.registries.BuiltInRegistries.ITEM.getKey(stack.getItem());
-        String namespace = key == null ? "" : key.getNamespace();
+        String key = groupKey(stack);
         for (ItemStack sample : result) {
             if (sample.isEmpty()) {
                 continue;
             }
-            net.minecraft.resources.ResourceLocation sampleKey =
-                    net.minecraft.core.registries.BuiltInRegistries.ITEM.getKey(sample.getItem());
-            if (sampleKey != null && namespace.equals(sampleKey.getNamespace())) {
+            if (key.equals(groupKey(sample))) {
                 return result;
             }
         }
+        // 整只存下来：属性过滤器的属性条目全在组件里，只留注册名会变成空过滤器
         result.add(stack.copyWithCount(1));
         return result;
+    }
+
+    /**
+     * 样本的分组标识，和客户端 {@code ClassifyGroups.groupId} 是同一套规则：
+     * 属性过滤器按「过滤器配置」区分，普通物品按命名空间区分。
+     * <p>
+     * 之前这里按命名空间去重 —— 于是 create 的模组样本一加，属性过滤器就被当成重复项拒掉了。
+     */
+    public static String groupKey(ItemStack stack) {
+        if (stack == null || stack.isEmpty()) {
+            return "";
+        }
+        if (CreateAttributeFilterCompat.isAttributeFilter(stack)) {
+            return "attr:" + CreateAttributeFilterCompat.key(stack);
+        }
+        net.minecraft.resources.ResourceLocation id =
+                net.minecraft.core.registries.BuiltInRegistries.ITEM.getKey(stack.getItem());
+        return "mod:" + (id == null ? "" : id.getNamespace());
     }
 
     /** 一键分类：扫描背包物品槽，把每个模组的第一个物品加为样本。 */
