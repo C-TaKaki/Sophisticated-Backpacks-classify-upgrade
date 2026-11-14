@@ -76,9 +76,9 @@ public abstract class StorageScreenBaseMixin {
     /** 横幅 id → 本帧的显示 y（含过渡偏移）。 */
     @Unique
     private final Map<String, Integer> sbaddon$bannerDrawY = new java.util.HashMap<>();
-    /** 横幅右侧展开按钮的命中区：id → {x, y}。绘制时写入，点击时读。 */
+    /** 横幅整行的命中区：id → {x, y, w, h}。绘制时写入，点击时读。点整条横幅都能切换展开/收起。 */
     @Unique
-    private final Map<String, int[]> sbaddon$toggleHits = new java.util.HashMap<>();
+    private final Map<String, int[]> sbaddon$bannerHits = new java.util.HashMap<>();
     /** 上一帧的滚动行，滚动时不播过渡动画（否则整片内容会"追"着滚）。 */
     @Unique
     private int sbaddon$lastMotionScroll = -1;
@@ -105,7 +105,7 @@ public abstract class StorageScreenBaseMixin {
         sbaddon$placements = List.of();
         sbaddon$maxScroll = 0;
         sbaddon$bannerDrawY.clear();
-        sbaddon$toggleHits.clear();
+        sbaddon$bannerHits.clear();
 
         StorageScreenBase<?> self = (StorageScreenBase<?>) (Object) this;
         AbstractContainerMenu rawMenu = self.getMenu();
@@ -343,7 +343,9 @@ public abstract class StorageScreenBaseMixin {
             boolean btnHovered = ExpandCollapseButton.isOver(btnX, btnY, mouseX, mouseY);
             ExpandCollapseButton.render(graphics, btnX, btnY,
                     ClassifyCollapse.expandAmount(banner.id()), btnHovered, true);
-            sbaddon$toggleHits.put(banner.id(), new int[]{btnX, btnY});
+            // 命中区记整条横幅（按钮在其中），点横幅任意位置都能切换展开/收起
+            sbaddon$bannerHits.put(banner.id(),
+                    new int[]{x, y, banner.width(), ClassifyLayout.CELL});
 
             // 模组名过长时按剩余宽度截断加省略号，不让文字冲出横幅（右侧要留出按钮的位置）
             String label = banner.label().getString();
@@ -357,19 +359,25 @@ public abstract class StorageScreenBaseMixin {
     }
 
     /**
-     * 横幅右端的展开/收起按钮。命中就吃掉这次点击，避免穿透到下面的槽位。
+     * 点击分类横幅切换该组的展开/收起。
      * <p>
-     * 命中区是上一帧渲染时写下的（{@code sbaddon$toggleHits}），坐标已经是屏幕坐标。
+     * 整条横幅都是热区（右侧箭头按钮只是视觉提示）：状态存在 {@link ClassifyCollapse} 里，
+     * 重复点击就是来回切，动画每次都从当前箭头位置继续，不会跳。命中就吃掉这次点击，
+     * 避免穿透到下面的槽位。
+     * <p>
+     * 命中区是上一帧渲染时写下的（{@code sbaddon$bannerHits}），坐标已经是屏幕坐标。
+     * 没有横幅（一条都没展开过 / 分类视图未接管）时直接放行，不影响原版点击。
      */
     @Inject(method = "mouseClicked", at = @At("HEAD"), cancellable = true)
     private void sbaddon$toggleGroup(double mouseX, double mouseY, int button,
                                      CallbackInfoReturnable<Boolean> cir) {
-        if (button != 0 || sbaddon$toggleHits.isEmpty()) {
+        if (button != 0 || sbaddon$bannerHits.isEmpty()) {
             return;
         }
-        for (Map.Entry<String, int[]> entry : sbaddon$toggleHits.entrySet()) {
+        for (Map.Entry<String, int[]> entry : sbaddon$bannerHits.entrySet()) {
             int[] hit = entry.getValue();
-            if (ExpandCollapseButton.isOver(hit[0], hit[1], mouseX, mouseY)) {
+            if (mouseX >= hit[0] && mouseX < hit[0] + hit[2]
+                    && mouseY >= hit[1] && mouseY < hit[1] + hit[3]) {
                 ClassifyCollapse.toggle(entry.getKey());
                 cir.setReturnValue(true);
                 return;

@@ -156,9 +156,9 @@ public abstract class BackpackScreenMixin {
     /** 横幅 id → 本帧显示 y。 */
     @Unique
     private final Map<String, Integer> sbaddon$bannerDrawY = new HashMap<>();
-    /** 横幅右侧展开按钮的命中区：id → {x, y}。 */
+    /** 横幅整行的命中区：id → {x, y, w, h}。点整条横幅都能切换展开/收起。 */
     @Unique
-    private final Map<String, int[]> sbaddon$toggleHits = new HashMap<>();
+    private final Map<String, int[]> sbaddon$bannerHits = new HashMap<>();
     /** 上一帧滚动行，滚动时不播过渡动画。 */
     @Unique
     private int sbaddon$lastMotionScroll = -1;
@@ -291,7 +291,7 @@ public abstract class BackpackScreenMixin {
         sbaddon$placements = List.of();
         sbaddon$maxScroll = 0;
         sbaddon$bannerDrawY.clear();
-        sbaddon$toggleHits.clear();
+        sbaddon$bannerHits.clear();
 
         BackpackScreen self = sbaddon$self();
         BackpackMenu menu = self.getMenu();
@@ -512,7 +512,9 @@ public abstract class BackpackScreenMixin {
             boolean btnHovered = ExpandCollapseButton.isOver(btnX, btnY, mouseX, mouseY);
             ExpandCollapseButton.render(graphics, btnX, btnY,
                     ClassifyCollapse.expandAmount(banner.id()), btnHovered, true);
-            sbaddon$toggleHits.put(banner.id(), new int[]{btnX, btnY});
+            // 命中区记整条横幅（按钮在其中），点横幅任意位置都能切换展开/收起
+            sbaddon$bannerHits.put(banner.id(),
+                    new int[]{x, y, banner.width(), ClassifyLayout.CELL});
 
             String label = banner.label().getString();
             int textLeft = x + 20 + 4;
@@ -1004,10 +1006,11 @@ public abstract class BackpackScreenMixin {
         if (!sbaddon$applied || button != 0) {
             return;
         }
-        // 横幅右端的展开/收起按钮优先：命中就吃掉这次点击，别让它落到下面的槽位上
-        for (Map.Entry<String, int[]> entry : sbaddon$toggleHits.entrySet()) {
+        // 点分类横幅任意位置切换该组展开/收起：命中就吃掉这次点击，别让它落到下面的槽位上。
+        // 状态在 ClassifyCollapse 里，重复点击就是来回切，动画从当前进度继续
+        for (Map.Entry<String, int[]> entry : sbaddon$bannerHits.entrySet()) {
             int[] hit = entry.getValue();
-            if (ExpandCollapseButton.isOver(hit[0], hit[1], mouseX, mouseY)) {
+            if (sbaddon$inside(mouseX, mouseY, hit[0], hit[1], hit[2], hit[3])) {
                 ClassifyCollapse.toggle(entry.getKey());
                 cir.setReturnValue(true);
                 return;
