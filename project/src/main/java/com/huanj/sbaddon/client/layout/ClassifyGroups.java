@@ -79,6 +79,29 @@ public final class ClassifyGroups {
     }
 
     /**
+     * 退还给玩家前，把我们自己加在样本上的标记全部剥掉。
+     * <p>
+     * 退回去的应该是玩家原来那只过滤器，而不是带一堆内部 NBT 的样本；否则
+     * 它和新拿的过滤器组件不同，去重 / 光标比对都会被这些标记干扰。
+     */
+    public static void stripTags(ItemStack stack) {
+        if (stack == null || stack.isEmpty()) {
+            return;
+        }
+        CompoundTag data = stack.getOrDefault(DataComponents.CUSTOM_DATA, CustomData.EMPTY).copyTag();
+        if (!data.contains(NAME_TAG) && !data.contains(PAID_TAG)) {
+            return;
+        }
+        data.remove(NAME_TAG);
+        data.remove(PAID_TAG);
+        if (data.isEmpty()) {
+            stack.remove(DataComponents.CUSTOM_DATA);
+        } else {
+            stack.set(DataComponents.CUSTOM_DATA, CustomData.of(data));
+        }
+    }
+
+    /**
      * 把名字写进样本物品（{@code null} / 空串 = 删掉，恢复默认名）。
      *
      * @return 是否真的改动了（调用方据此决定要不要回写样本槽）

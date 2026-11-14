@@ -326,7 +326,9 @@ public class ClassifyUpgradeContainer extends UpgradeContainerBase<ClassifyUpgra
         if (!ClassifyGroups.isPaid(removed)) {
             return;
         }
+        // 退款前剥掉内部标记，还回去的是玩家原来那只干净的过滤器
         ItemStack refund = removed.copyWithCount(1);
+        ClassifyGroups.stripTags(refund);
         if (!player.getInventory().add(refund)) {
             player.drop(refund, false);
         }
@@ -367,8 +369,6 @@ public class ClassifyUpgradeContainer extends UpgradeContainerBase<ClassifyUpgra
     public static class SampleSlot extends SlotItemHandler implements IFilterSlot {
         private final ItemStackHandler handler;
         private final ClassifyUpgradeContainer container;
-        /** 上一次已经收过费的过滤器配置；同一只重复点不再重复扣。 */
-        private String chargedKey;
 
         public SampleSlot(ClassifyUpgradeContainer container, ItemStackHandler handler,
                           int index, int x, int y) {
@@ -381,34 +381,24 @@ public class ClassifyUpgradeContainer extends UpgradeContainerBase<ClassifyUpgra
          * 幽灵放入完成后的回调（{@code StorageContainerMenuBase.clicked} 里 set 完就调它）。
          * <p>
          * 幽灵槽不扣玩家手上的数量，凭这一点属性过滤器就会被白拿 —— 它是带配置的物品，
-         * 不能白拿。这里按「槽里换成了另一只过滤器」补扣一次；重复点同一只不会重复扣。
+         * 每次放入都必须补扣一次。
+         * <p>
+         * 这里<b>不能</b>用「上次收过费的 key」做去重：删分类时 {@code applyOrder()} 直接改
+         * handler 清空槽位，不会走本回调，缓存就失效不了；退还的那只过滤器 key 又和原来一样，
+         * 再放回来会被当成「已付过费」跳过扣费 —— 正好就是「第一次消耗、删掉再放就不消耗」的刷物品漏洞。
+         * 客户端只做预测不扣，服务端每次点击扣一次，不存在双扣。
          */
         @Override
         public void onItemSet(int button) {
             ItemStack now = getItem();
-            if (now.isEmpty()) {
-                // 槽被清空（删分类 / 换成普通样本）：下一次放过滤器必须重新付费。
-                // 不清的话，删掉分类拿到退款后，同一份配置再放回来会被当成"已付过"而白拿。
-                chargedKey = null;
-                return;
-            }
-            String key = CreateAttributeFilterCompat.isAttributeFilter(now)
-                    ? CreateAttributeFilterCompat.key(now)
-                    : null;
-            if (key == null) {
-                chargedKey = null;
-                return;
-            }
-            if (key.equals(chargedKey)) {
+            if (now.isEmpty() || !CreateAttributeFilterCompat.isAttributeFilter(now)) {
                 return;
             }
             if (!container.chargeFilterFromCursor()) {
                 // 没扣到东西就把槽还原：宁可拒绝这次放入，也不能凭空多出一只过滤器
                 set(ItemStack.EMPTY);
-                chargedKey = null;
                 return;
             }
-            chargedKey = key;
             // 在样本上留一个「已付费」标记，删分类时只有带标记的才允许退还
             ClassifyGroups.markPaid(now);
             container.getSamples().setStackInSlot(getSlotIndex(), now);
@@ -461,8 +451,11 @@ public class ClassifyUpgradeContainer extends UpgradeContainerBase<ClassifyUpgra
                 }
                 boolean existingFilter = CreateAttributeFilterCompat.isAttributeFilter(existing);
                 if (attributeFilter) {
-                    // 同一份过滤器配置只允许一条
-                    if (existingFilter && ItemStack.isSameItemSameComponents(existing, stack)) {
+                    // 同一份过滤器配置只允许一条。按 key 比而不是整件组件比：
+                    // 已入库的样本带着 SbaddonName / SbaddonPaid 标记，整件比会把它和新拿的
+                    // 判成不同配置，去重就形同虚设（key() 计算时本来就会剥掉这两个标记）
+                    if (existingFilter && CreateAttributeFilterCompat.key(existing)
+                            .equals(CreateAttributeFilterCompat.key(stack))) {
                         return false;
                     }
                     continue;
