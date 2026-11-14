@@ -72,16 +72,19 @@ public class ClassifyUpgradeContainer extends UpgradeContainerBase<ClassifyUpgra
      * 从光标上扣掉一个物品（样本槽的幽灵放入不扣数量，属性过滤器要单独收一次）。
      * 只在服务端执行，扣完由菜单同步回客户端。
      */
-    void chargeFilterFromCursor() {
+    boolean chargeFilterFromCursor() {
         if (player.level().isClientSide()) {
-            return;
+            // 客户端只做预测，真正的扣费在服务端；别在客户端改光标，否则两边各扣一次
+            return true;
         }
         ItemStack carried = player.containerMenu.getCarried();
         if (carried.isEmpty()) {
-            return;
+            // 手上没有可扣的东西 = 这次放入没有来源，不能放行（否则就是白拿一只过滤器）
+            return false;
         }
         carried.shrink(1);
         player.containerMenu.setCarried(carried);
+        return true;
     }
 
     private void persistSamples() {
@@ -318,6 +321,11 @@ public class ClassifyUpgradeContainer extends UpgradeContainerBase<ClassifyUpgra
         if (!CreateAttributeFilterCompat.isAttributeFilter(removed)) {
             return;
         }
+        // 只有真付过费的才退：老存档 / 自动分类塞进来、以及漏洞期间白拿的样本都不带标记，
+        // 否则删一次分类就等于凭空印一只过滤器
+        if (!ClassifyGroups.isPaid(removed)) {
+            return;
+        }
         ItemStack refund = removed.copyWithCount(1);
         if (!player.getInventory().add(refund)) {
             player.drop(refund, false);
@@ -378,15 +386,32 @@ public class ClassifyUpgradeContainer extends UpgradeContainerBase<ClassifyUpgra
         @Override
         public void onItemSet(int button) {
             ItemStack now = getItem();
+            if (now.isEmpty()) {
+                // 槽被清空（删分类 / 换成普通样本）：下一次放过滤器必须重新付费。
+                // 不清的话，删掉分类拿到退款后，同一份配置再放回来会被当成"已付过"而白拿。
+                chargedKey = null;
+                return;
+            }
             String key = CreateAttributeFilterCompat.isAttributeFilter(now)
                     ? CreateAttributeFilterCompat.key(now)
                     : null;
-            if (key == null || key.equals(chargedKey)) {
-                chargedKey = key;
+            if (key == null) {
+                chargedKey = null;
+                return;
+            }
+            if (key.equals(chargedKey)) {
+                return;
+            }
+            if (!container.chargeFilterFromCursor()) {
+                // 没扣到东西就把槽还原：宁可拒绝这次放入，也不能凭空多出一只过滤器
+                set(ItemStack.EMPTY);
+                chargedKey = null;
                 return;
             }
             chargedKey = key;
-            container.chargeFilterFromCursor();
+            // 在样本上留一个「已付费」标记，删分类时只有带标记的才允许退还
+            ClassifyGroups.markPaid(now);
+            container.getSamples().setStackInSlot(getSlotIndex(), now);
         }
 
         @Override
@@ -416,6 +441,12 @@ public class ClassifyUpgradeContainer extends UpgradeContainerBase<ClassifyUpgra
                     return false;
                 }
                 if ("blacklist".equals(CreateAttributeFilterCompat.mode(stack))) {
+                    return false;
+                }
+                // 只接受「光标上真的拿着这只过滤器」的放入：QuickMove / setGhostSlot 这类
+                // 从别处复制一份过来的路径没有可扣的来源，一律拒绝，堵掉刷物品
+                ItemStack carried = container.player.containerMenu.getCarried();
+                if (carried.isEmpty() || !ItemStack.isSameItemSameComponents(carried, stack)) {
                     return false;
                 }
             }

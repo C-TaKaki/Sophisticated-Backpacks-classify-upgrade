@@ -37,6 +37,15 @@ public final class ClassifyGroups {
      */
     public static final String NAME_TAG = "SbaddonName";
 
+    /**
+     * 样本物品上「这只过滤器已经付过费」的标记。
+     * <p>
+     * 删除分类时要把属性过滤器还给玩家，但只有真付过费的才该还 —— 没有这个标记，
+     * 只要有办法把一只过滤器弄进样本槽（老存档、自动分类、以及以前的幽灵放入漏洞），
+     * 删分类就等于凭空印一只出来。
+     */
+    public static final String PAID_TAG = "SbaddonPaid";
+
     /** 样本上直接记的名字；没有返回 {@code null}。 */
     public static String storedName(ItemStack sample) {
         if (sample == null || sample.isEmpty()) {
@@ -45,6 +54,28 @@ public final class ClassifyGroups {
         CompoundTag data = sample.getOrDefault(DataComponents.CUSTOM_DATA, CustomData.EMPTY).copyTag();
         String name = data.getString(NAME_TAG);
         return name.isBlank() ? null : name;
+    }
+
+    /** 这只样本是否已经为它付过费（属性过滤器用）。 */
+    public static boolean isPaid(ItemStack sample) {
+        if (sample == null || sample.isEmpty()) {
+            return false;
+        }
+        return sample.getOrDefault(DataComponents.CUSTOM_DATA, CustomData.EMPTY)
+                .copyTag().getBoolean(PAID_TAG);
+    }
+
+    /** 记下「已付费」标记。 */
+    public static void markPaid(ItemStack sample) {
+        if (sample == null || sample.isEmpty()) {
+            return;
+        }
+        CompoundTag data = sample.getOrDefault(DataComponents.CUSTOM_DATA, CustomData.EMPTY).copyTag();
+        if (data.getBoolean(PAID_TAG)) {
+            return;
+        }
+        data.putBoolean(PAID_TAG, true);
+        sample.set(DataComponents.CUSTOM_DATA, CustomData.of(data));
     }
 
     /**

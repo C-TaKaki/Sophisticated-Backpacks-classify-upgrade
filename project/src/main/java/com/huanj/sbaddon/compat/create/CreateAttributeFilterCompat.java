@@ -207,8 +207,15 @@ public final class CreateAttributeFilterCompat {
         ItemStack cleaned = filter.copy();
         CompoundTag custom = cleaned.getOrDefault(net.minecraft.core.component.DataComponents.CUSTOM_DATA,
                 net.minecraft.world.item.component.CustomData.EMPTY).copyTag();
-        if (custom.contains(com.huanj.sbaddon.client.layout.ClassifyGroups.NAME_TAG)) {
-            custom.remove(com.huanj.sbaddon.client.layout.ClassifyGroups.NAME_TAG);
+        boolean stripped = false;
+        for (String tag : new String[]{com.huanj.sbaddon.client.layout.ClassifyGroups.NAME_TAG,
+                com.huanj.sbaddon.client.layout.ClassifyGroups.PAID_TAG}) {
+            if (custom.contains(tag)) {
+                custom.remove(tag);
+                stripped = true;
+            }
+        }
+        if (stripped) {
             if (custom.isEmpty()) {
                 cleaned.remove(net.minecraft.core.component.DataComponents.CUSTOM_DATA);
             } else {
