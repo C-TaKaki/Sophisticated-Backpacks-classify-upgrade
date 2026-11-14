@@ -398,8 +398,10 @@ public class ClassifyTab extends UpgradeSettingsTab<ClassifyUpgradeContainer> {
         String current = getContainer().getCustomNames().getOrDefault(groupId, "");
         String name = typed;
         if (!current.equals(name)) {
+            // 本地先改一份，界面立刻有反馈；真正的落盘交给服务端（改组件 + 槽位标脏）
             getContainer().applyRename(groupId, name);
-            getContainer().sendDataToServer(() -> ClassifyUpgradeContainer.renameTag(groupId, name));
+            net.neoforged.neoforge.network.PacketDistributor.sendToServer(
+                    new com.huanj.sbaddon.net.ClassifyRenameAction(groupId, name));
         }
         cancelRename();
     }

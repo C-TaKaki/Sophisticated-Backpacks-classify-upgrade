@@ -5,6 +5,7 @@ import net.minecraft.core.HolderLookup;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.world.entity.player.Player;
+import net.minecraft.world.inventory.Slot;
 import net.minecraft.world.item.ItemStack;
 import net.neoforged.neoforge.items.ItemStackHandler;
 import net.neoforged.neoforge.items.SlotItemHandler;
@@ -179,8 +180,33 @@ public class ClassifyUpgradeContainer extends UpgradeContainerBase<ClassifyUpgra
         if (tag.contains(TAG_RENAME)) {
             CompoundTag rename = tag.getCompound(TAG_RENAME);
             applyRename(rename.getString(TAG_RENAME_ID), rename.getString(TAG_RENAME_NAME));
+            markUpgradeSlotChanged();
         }
 
+    }
+
+    /**
+     * 把升级槽标脏，让改动真正落盘。
+     * <p>
+     * {@code wrapper.save()} 只是把 ItemStack 写回升级物品，背包本体（storage 的 NBT）并不会因此被标记为
+     * 已修改 —— 采样槽有真正的 {@link Slot}，SB 的幽灵放入流程会替我们调 {@code setChanged()}，
+     * 所以样本能存住；改名没有经过任何槽位交互，光改组件的话只在内存里生效，
+     * 关掉游戏（存档写盘）后就丢了。这里补上这一步。
+     */
+    private void markUpgradeSlotChanged() {
+        if (player.level().isClientSide()) {
+            return;
+        }
+        if (!(player.containerMenu instanceof StorageContainerMenuBase<?> menu)) {
+            return;
+        }
+        for (Slot slot : menu.slots) {
+            if (slot.getItem().is(com.huanj.sbaddon.registry.SBItems.CLASSIFY_UPGRADE.get())) {
+                slot.setChanged();
+                menu.broadcastChanges();
+                return;
+            }
+        }
     }
 
     /**
