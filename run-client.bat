@@ -14,4 +14,4 @@ echo [run-client] launcher: pwsh 7
 set "RC=%ERRORLEVEL%"
 echo.
 echo [run-client] exited with code %RC%
-pause
+
