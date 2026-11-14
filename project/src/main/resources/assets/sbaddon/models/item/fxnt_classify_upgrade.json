@@ -1,6 +1,6 @@
 {
   "parent": "minecraft:item/generated",
   "textures": {
-    "layer0": "sbaddon:item/classify_upgrade"
+    "layer0": "sbaddon:item/fxnt_classify_upgrade"
   }
 }
