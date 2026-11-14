@@ -150,9 +150,6 @@ public abstract class BackpackScreenMixin {
     private List<ClassifyLayout.Banner> sbaddon$banners = List.of();
     @Unique
     private List<ClassifyLayout.Placement> sbaddon$placements = List.of();
-    /** 只补格子背景、不挂槽位的位置（背包没有空槽可用时把分类的块铺满）。 */
-    @Unique
-    private List<ClassifyLayout.Cell> sbaddon$cells = List.of();
     /** 槽位 / 横幅的过渡动画（展开收起时下面的组滑上来）。 */
     @Unique
     private final ClassifyMotion sbaddon$motion = new ClassifyMotion();
@@ -289,7 +286,6 @@ public abstract class BackpackScreenMixin {
         // 每帧先清空：升级被拿掉时这里提前 return，留着上一帧的布局会让横幅/格子残留
         sbaddon$banners = List.of();
         sbaddon$placements = List.of();
-        sbaddon$cells = List.of();
         sbaddon$maxScroll = 0;
         sbaddon$bannerDrawY.clear();
         sbaddon$toggleHits.clear();
@@ -371,7 +367,6 @@ public abstract class BackpackScreenMixin {
 
         sbaddon$banners = result.banners();
         sbaddon$placements = animated;
-        sbaddon$cells = result.cells();
         sbaddon$applied = true;
     }
 
@@ -448,16 +443,10 @@ public abstract class BackpackScreenMixin {
      */
     @Unique
     private void sbaddon$blitCells(GuiGraphics graphics, int left, int top) {
-        if (sbaddon$placements.isEmpty() && sbaddon$cells.isEmpty()) {
+        if (sbaddon$placements.isEmpty()) {
             return;
         }
         ResourceLocation texture = sbaddon$cellTexture();
-        // 没有空槽可用的空格也要贴格子，分类的块才是完整矩形
-        for (ClassifyLayout.Cell cell : sbaddon$cells) {
-            graphics.blit(texture, left + cell.x() - 1, top + cell.y() - 1,
-                    SBADDON_CELL_TEX_U, SBADDON_CELL_TEX_V, SBADDON_CELL, SBADDON_CELL,
-                    SBADDON_CELL_TEX_W, sbaddon$cellTextureHeight);
-        }
         for (ClassifyLayout.Placement placement : sbaddon$placements) {
             // placement 是「物品」坐标，贴图格子比它左上各多 1px
             // 注意用 9 参数重载：7 参数版本默认按 256×256 算 UV，这张贴图是 282×{225,281,317}，

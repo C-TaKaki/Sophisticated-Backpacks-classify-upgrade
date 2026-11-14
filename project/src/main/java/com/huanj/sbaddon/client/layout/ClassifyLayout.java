@@ -47,18 +47,14 @@ public final class ClassifyLayout {
     public record Placement(int slotIndex, int x, int y) {
     }
 
-    /** 只画格子背景、不挂槽位的位置（背包里没有空槽可用时用来把分类的块补齐）。 */
-    public record Cell(int x, int y) {
-    }
-
-    public record Result(List<Banner> banners, List<Placement> placements, List<Cell> cells, int totalRows) {
+    public record Result(List<Banner> banners, List<Placement> placements, int totalRows) {
         public static Result empty() {
-            return new Result(List.of(), List.of(), List.of(), 0);
+            return new Result(List.of(), List.of(), 0);
         }
     }
 
-    /** 行内未被物品占用的单元格（y 是相对内容顶部的像素坐标），用来摆放空槽。 */
-    private record Gap(int y, int col) {
+    /** 一个分类块：分组信息 + 它名下的存储槽（含取物空洞）。 */
+    private record Block(ClassifyGroup group, List<Integer> items) {
     }
 
     /**
@@ -72,6 +68,7 @@ public final class ClassifyLayout {
         if (storageSlots <= 0 || cols <= 0 || rows <= 0) {
             return Result.empty();
         }
+        Predicate<String> collapsedGroups = collapsed == null ? groupId -> false : collapsed;
 
         List<ItemStack> samples = source.samples();
         // 分组来源统一：模组样本 → 按命名空间；属性过滤器样本 → 按过滤器自带的匹配逻辑。
@@ -128,14 +125,9 @@ public final class ClassifyLayout {
         }
         Set<Integer> claimed = new HashSet<>();
 
-        // 兜底组不再自己排序：直接沿用存储槽的原始顺序，而 SB 的排序按钮会重排实际物品，
-        // 所以"跟随背包自带排序"是自然成立的。
-        List<Banner> banners = new ArrayList<>();
-        List<Placement> placements = new ArrayList<>();
-        List<Cell> cells = new ArrayList<>();
-        List<Gap> gaps = new ArrayList<>();
-
-        int row = 0;
+        // 1) 先把分组汇成有序的分类块（兜底组排最后），取物空洞并回各自的块。
+        //    折叠的块照样列出，只是不占格子 —— 它的物品仍然占着存储槽，不能给别人用。
+        List<Block> blocks = new ArrayList<>();
         for (ClassifyGroup group : groups) {
             List<Integer> items = buckets.get(group.id());
             if (items == null) {
@@ -146,29 +138,22 @@ public final class ClassifyLayout {
                 // 所以"空标签只在重开时隐藏"自然成立
                 continue;
             }
-            List<Integer> merged = mergeHoles(items, group.id(), holes, claimed);
-            boolean groupCollapsed = collapsed != null && collapsed.test(group.id());
-            row = placeGroup(row, cols, rows, scrollRows, group.label(), group.icon(),
-                    groupCollapsed ? List.of() : merged, groupCollapsed, group.id(),
-                    originX, originY, banners, placements, gaps);
+            blocks.add(new Block(group, mergeHoles(items, group.id(), holes, claimed)));
         }
         if (!fallback.isEmpty() || SlotMemory.wasActive(SlotMemory.FALLBACK)) {
-            List<Integer> merged = mergeHoles(fallback, SlotMemory.FALLBACK, holes, claimed);
-            boolean fallbackCollapsed = collapsed != null && collapsed.test(SlotMemory.FALLBACK);
-            row = placeGroup(row, cols, rows, scrollRows,
-                    Component.translatable("gui.sbaddon.classify.fallback"), iconFor(samples, null),
-                    fallbackCollapsed ? List.of() : merged, fallbackCollapsed, SlotMemory.FALLBACK,
-                    originX, originY, banners, placements, gaps);
+            blocks.add(new Block(
+                    new ClassifyGroup(SlotMemory.FALLBACK, iconFor(samples, null),
+                            Component.translatable("gui.sbaddon.classify.fallback"), stack -> false),
+                    mergeHoles(fallback, SlotMemory.FALLBACK, holes, claimed)));
         }
-        int contentY = row;
 
         // 没被任何现存组认领的空洞（例如白名单里删掉了那个分类）→ 释放，回到普通空槽池
-        Iterator<Integer> remaining = holes.iterator();
-        while (remaining.hasNext()) {
-            int slot = remaining.next();
+        Iterator<Integer> remainingHoles = holes.iterator();
+        while (remainingHoles.hasNext()) {
+            int slot = remainingHoles.next();
             if (!claimed.contains(slot)) {
                 SlotMemory.forget(slot);
-                remaining.remove();
+                remainingHoles.remove();
             }
         }
 
@@ -179,45 +164,78 @@ public final class ClassifyLayout {
             }
         }
 
-        int scrollPx = scrollRows * CELL;
-        int viewHeight = rows * CELL;
-
-        // 1) 先用空槽填满内容行内的空格，让每个可见格子都能放东西。
-        //    空槽用完之后剩下的空格只补格子背景（cells）—— 背包塞满时分类的块也要是完整矩形，
-        //    否则每个分类末尾都缺一块，看起来像"没铺满"。
-        int cursor = 0;
-        for (Gap gap : gaps) {
-            int y = gap.y() - scrollPx;
-            if (y < 0 || y >= viewHeight) {
+        // 2) 剩余空槽按分类平均分配；除不尽的部分按分类列表从上到下依次补一格。
+        //    折叠的块不参与均分（它一个格子都不显示），但它占用的存储槽本来就不在空槽池里。
+        int visibleBlocks = 0;
+        for (Block block : blocks) {
+            if (!collapsedGroups.test(block.group().id())) {
+                visibleBlocks++;
+            }
+        }
+        int share = visibleBlocks <= 0 ? 0 : emptySlots.size() / visibleBlocks;
+        int remainder = visibleBlocks <= 0 ? 0 : emptySlots.size() % visibleBlocks;
+        int[] quota = new int[blocks.size()];
+        int visibleIndex = 0;
+        for (int i = 0; i < blocks.size(); i++) {
+            Block block = blocks.get(i);
+            if (collapsedGroups.test(block.group().id())) {
                 continue;
             }
-            if (cursor < emptySlots.size()) {
-                int slotIndex = emptySlots.get(cursor++);
-                placements.add(new Placement(slotIndex, originX + gap.col() * CELL, originY + y));
-            } else {
-                cells.add(new Cell(originX + gap.col() * CELL, originY + y));
-            }
+            int bonus = share + (visibleIndex < remainder ? 1 : 0);
+            visibleIndex++;
+            quota[i] = block.items().size() + bonus;
         }
 
-        // 2) 剩下的空槽顺着内容之后继续铺
-        int tailY = contentY;
-        int tailCol = 0;
-        while (cursor < emptySlots.size()) {
-            int slotIndex = emptySlots.get(cursor++);
-            int y = tailY - scrollPx;
-            if (y >= 0 && y < viewHeight) {
-                placements.add(new Placement(slotIndex, originX + tailCol * CELL, originY + y));
-            }
-            tailCol++;
-            if (tailCol >= cols) {
-                tailCol = 0;
-                tailY += CELL;
-            }
-        }
-        int totalHeight = contentY + (tailCol > 0 ? CELL : 0);
-        int totalRows = (totalHeight + CELL - 1) / CELL;
+        int scrollPx = scrollRows * CELL;
+        int viewHeight = rows * CELL;
+        List<Banner> banners = new ArrayList<>();
+        List<Placement> placements = new ArrayList<>();
 
-        return new Result(banners, placements, cells, totalRows);
+        if (blocks.isEmpty()) {
+            // 一个分类都没有（背包空 / 白名单全空）：退回最朴素的整格网格，
+            // 否则所有槽位都会被当成"没有归属"隐藏，背包看起来是空的、东西也放不进去
+            for (int i = 0; i < emptySlots.size(); i++) {
+                int viewY = (i / cols) * CELL - scrollPx;
+                if (viewY >= 0 && viewY < viewHeight) {
+                    placements.add(new Placement(emptySlots.get(i),
+                            originX + (i % cols) * CELL, originY + viewY));
+                }
+            }
+            return new Result(List.of(), placements, (emptySlots.size() + cols - 1) / cols);
+        }
+
+        // 3) 逐块摆放：横幅占一行，下面是「物品 + 分到的空槽」，按列流式排。
+        //    每个分类从新的一行开始，块与块之间不会互相穿插。
+        int emptyCursor = 0;
+        int y = 0;
+        for (int i = 0; i < blocks.size(); i++) {
+            Block block = blocks.get(i);
+            int bannerY = y - scrollPx;
+            if (bannerY >= 0 && bannerY < viewHeight) {
+                banners.add(new Banner(originX, originY + bannerY, cols * CELL,
+                        block.group().icon(), block.group().label(), block.group().id()));
+            }
+            int itemTop = y + CELL + BANNER_GAP;
+            int count = quota[i];
+            for (int k = 0; k < count; k++) {
+                int slotIndex = k < block.items().size()
+                        ? block.items().get(k)
+                        : (emptyCursor < emptySlots.size() ? emptySlots.get(emptyCursor++) : -1);
+                if (slotIndex < 0) {
+                    continue;
+                }
+                int cellY = itemTop + (k / cols) * CELL;
+                int viewY = cellY - scrollPx;
+                if (viewY >= 0 && viewY < viewHeight) {
+                    placements.add(new Placement(slotIndex, originX + (k % cols) * CELL, originY + viewY));
+                }
+            }
+            int blockRows = (count + cols - 1) / cols;
+            y = itemTop + blockRows * CELL;
+        }
+        int totalRows = (y + CELL - 1) / CELL;
+
+        return new Result(banners, placements, totalRows);
     }
 
     /**
@@ -244,44 +262,6 @@ public final class ClassifyLayout {
         merged.sort(Integer::compareTo);
         claimed.addAll(groupHoles);
         return merged;
-    }
-
-    /**
-     * 摆一个分组：横幅 + 若干行物品。参数和返回值都是「相对内容顶部的像素 y」，
-     * 因为横幅行比物品行多占 {@link #BANNER_GAP} 的间距，纯行号算不准。
-     */
-    private static int placeGroup(int y, int cols, int rows, int scrollRows, Component label, ItemStack icon,
-                                  List<Integer> items, boolean collapsed, String groupId,
-                                  int originX, int originY,
-                                  List<Banner> banners, List<Placement> placements, List<Gap> gaps) {
-        int scrollPx = scrollRows * CELL;
-        int viewHeight = rows * CELL;
-
-        int bannerY = y - scrollPx;
-        if (bannerY >= 0 && bannerY < viewHeight) {
-            banners.add(new Banner(originX, originY + bannerY, cols * CELL, icon, label, groupId));
-        }
-        if (collapsed) {
-            // 收起：只占横幅那一行，物品槽全部不摆（它们的槽位保持隐藏），下面的组自动上提
-            return y + CELL + BANNER_GAP;
-        }
-
-        int itemTop = y + CELL + BANNER_GAP;
-        int itemRows = (items.size() + cols - 1) / cols;
-        for (int k = 0; k < itemRows * cols; k++) {
-            int cellY = itemTop + (k / cols) * CELL;
-            int c = k % cols;
-            if (k >= items.size()) {
-                // 该行剩余空格：先记下来，稍后用空槽填
-                gaps.add(new Gap(cellY, c));
-                continue;
-            }
-            int viewY = cellY - scrollPx;
-            if (viewY >= 0 && viewY < viewHeight) {
-                placements.add(new Placement(items.get(k), originX + c * CELL, originY + viewY));
-            }
-        }
-        return itemTop + itemRows * CELL;
     }
 
     private static ItemStack iconFor(List<ItemStack> samples, String namespace) {

@@ -102,9 +102,14 @@ public record FxntClassifyAction(int action, int index, int dir, String groupId,
             if (slot == null) {
                 return;
             }
-            ItemStack stack = slot.getItem();
+            // 注意：这里是升级物品，不是包里的样本。record 里也有个 stack() 组件，
+            // 之前把局部变量也叫 stack，ACTION_ADD 里拿到的是升级物品本身，
+            // 于是"拖入过滤器"加进去的是本模组的升级物品 —— 列表里冒出一行
+            // 「Sophisticated Backpacks Addon」，过滤器永远加不上。
+            ItemStack upgradeStack = slot.getItem();
             HolderLookup.Provider registries = player.level().registryAccess();
-            List<ItemStack> samples = new ArrayList<>(FxntClassifyData.snapshot(stack, registries).samples());
+            List<ItemStack> samples = new ArrayList<>(
+                    FxntClassifyData.snapshot(upgradeStack, registries).samples());
 
             switch (action) {
                 case ACTION_AUTO -> samples = FxntClassifyData.autoClassify(samples,
@@ -124,10 +129,11 @@ public record FxntClassifyAction(int action, int index, int dir, String groupId,
                     samples.add(target, moved);
                 }
                 case ACTION_ADD -> {
-                    if (stack.isEmpty()) {
+                    ItemStack sample = this.stack();
+                    if (sample.isEmpty()) {
                         return;
                     }
-                    samples = FxntClassifyData.addSample(samples, stack);
+                    samples = FxntClassifyData.addSample(samples, sample);
                 }
                 case ACTION_REORDER -> {
                     if (index < 0 || index >= samples.size() || dir < 0 || dir >= samples.size()
@@ -138,7 +144,7 @@ public record FxntClassifyAction(int action, int index, int dir, String groupId,
                     samples.add(dir, moved);
                 }
                 case ACTION_RENAME -> {
-                    FxntClassifyData.setName(stack, groupId, name);
+                    FxntClassifyData.setName(upgradeStack, groupId, name);
                     slot.setChanged();
                     return;
                 }
@@ -147,7 +153,7 @@ public record FxntClassifyAction(int action, int index, int dir, String groupId,
                 }
             }
 
-            FxntClassifyData.writeSamples(stack, samples, registries);
+            FxntClassifyData.writeSamples(upgradeStack, samples, registries);
             // 升级槽的 setChanged 会落到 BackpackContainer#setDataChanged()，
             // 背包内容随 CONTAINER 组件落盘，槽位差异再自动同步给客户端
             slot.setChanged();
