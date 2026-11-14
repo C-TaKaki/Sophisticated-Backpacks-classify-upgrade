@@ -127,13 +127,6 @@ public abstract class BackpackScreenMixin {
     @Unique
     private static final ResourceLocation SBADDON_TAB_TEXTURE =
             ResourceLocation.fromNamespaceAndPath("fxntstorage", "textures/gui/atlas.png");
-    /** 原版按钮贴图：FXNT 的页签就是 Button 控件，用同一套 sprite 才长得一样。 */
-    @Unique
-    private static final ResourceLocation SBADDON_TAB_BUTTON =
-            ResourceLocation.withDefaultNamespace("widget/button");
-    @Unique
-    private static final ResourceLocation SBADDON_TAB_BUTTON_HOVERED =
-            ResourceLocation.withDefaultNamespace("widget/button_highlighted");
     /** 改名输入框内文字相对边框的内缩（也是 EditBox 控件矩形相对边框的偏移）。 */
     @Unique
     private static final int SBADDON_TEXT_INSET = 4;
@@ -765,13 +758,11 @@ public abstract class BackpackScreenMixin {
         sbaddon$cancelHit = null;
 
         if (!sbaddon$panelOpen) {
-            // 和 FXNT 自己的页签同款画法：底层 24×24 页签贴图（atlas 的 u0/v47）+ 原版 18×20 按钮 + 居中图标。
-            // FXNT 的页签按钮就是 {@code Button} 控件，这里直接套同一套 widget 贴图，视觉上一模一样。
+            // 完全照 FXNT 自己的页签画法：
+            // 1) 24×24 页签底图（atlas u0/v47，黑色描边 + 左上白高光 + 灰面 + 右下暗边）画在按钮左上方外扩 3/2 px 处；
+            // 2) FXNT 的 IconButton 是 Button 子类但 renderWidget 只画物品，不画按钮底 —— 所以这里也不画任何额外边框；
+            // 3) 物品 16×16 在 18×20 按钮里居中（FXNT 用 w/2-8、h/2-8 算，即 +1、+2）。
             graphics.blit(SBADDON_TAB_TEXTURE, panelLeft - 3, tabTop - 2, 0.0F, 47.0F, 24, 24, 256, 256);
-            boolean tabHovered = sbaddon$inside(mouseX, mouseY, panelLeft, tabTop,
-                    SBADDON_TAB_W, SBADDON_TAB_H);
-            graphics.blitSprite(tabHovered ? SBADDON_TAB_BUTTON_HOVERED : SBADDON_TAB_BUTTON,
-                    panelLeft, tabTop, SBADDON_TAB_W, SBADDON_TAB_H);
             graphics.renderItem(upgradeIcon, panelLeft + 1, tabTop + 2);
             return;
         }
