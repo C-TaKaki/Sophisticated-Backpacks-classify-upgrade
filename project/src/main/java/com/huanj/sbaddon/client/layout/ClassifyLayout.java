@@ -5,6 +5,7 @@ import net.minecraft.client.Minecraft;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.network.chat.Component;
 import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.Items;
 
 import java.util.ArrayList;
 import java.util.HashSet;
@@ -136,8 +137,9 @@ public final class ClassifyLayout {
             blocks.add(new Block(group, mergeHoles(items, group.id(), holes, claimed)));
         }
         if (!fallback.isEmpty()) {
+            // 默认分类（没被任何模组 / 过滤器认领的物品）固定用草方块的物品贴图当图标
             blocks.add(new Block(
-                    new ClassifyGroup(SlotMemory.FALLBACK, iconFor(samples, null),
+                    new ClassifyGroup(SlotMemory.FALLBACK, new ItemStack(Items.GRASS_BLOCK),
                             Component.translatable("gui.sbaddon.classify.fallback"), stack -> false),
                     mergeHoles(fallback, SlotMemory.FALLBACK, holes, claimed)));
         }
