@@ -53,6 +53,16 @@ public final class SlotMemory {
         }
     }
 
+    /**
+     * 只保留仍然配置着的分组。
+     * <p>
+     * 删掉某个分类后，它不能再靠"本次会话活跃过"继续挂横幅 —— 之前要重开背包才会消失，
+     * 现在每帧布局前收缩一次，删完立刻反映到界面上。
+     */
+    public static void retainActive(java.util.Collection<String> groupIds) {
+        ACTIVE_GROUPS.retainAll(groupIds);
+    }
+
     /** 这个分组本次会话里装过物品。 */
     public static void markActive(String groupKey) {
         ACTIVE_GROUPS.add(groupKey);

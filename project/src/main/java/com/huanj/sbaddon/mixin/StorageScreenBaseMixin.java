@@ -82,6 +82,9 @@ public abstract class StorageScreenBaseMixin {
     /** 上一帧的滚动行，滚动时不播过渡动画（否则整片内容会"追"着滚）。 */
     @Unique
     private int sbaddon$lastMotionScroll = -1;
+    /** 上一帧的存储槽数量：换背包 / 加装升级后容量变了，动画缓存必须丢掉，不然会拿旧索引去插值。 */
+    @Unique
+    private int sbaddon$lastMotionSlots = -1;
 
     /** 上一帧是否真的套用过分类布局（用来判断需不需要把槽位还给 SB）。 */
     @Unique
@@ -163,10 +166,12 @@ public abstract class StorageScreenBaseMixin {
                     sbaddon$originX, sbaddon$originY);
         }
 
-        // 滚动时内容整体平移，插值会变成"追着滚"的补偿动画 —— 直接丢缓存让它瞬间落位
-        if (sbaddon$scroll != sbaddon$lastMotionScroll) {
+        // 滚动时内容整体平移，插值会变成"追着滚"的补偿动画 —— 直接丢缓存让它瞬间落位。
+        // 槽位数量变了同理（换背包 / 加装存储升级），否则会按旧索引从错误的位置滑过来
+        if (sbaddon$scroll != sbaddon$lastMotionScroll || storageSlots != sbaddon$lastMotionSlots) {
             sbaddon$motion.reset();
             sbaddon$lastMotionScroll = sbaddon$scroll;
+            sbaddon$lastMotionSlots = storageSlots;
         }
 
         sbaddon$motion.beginFrame();

@@ -1,6 +1,7 @@
 package com.huanj.sbaddon.compat.fxntstorage.net;
 
 import com.huanj.sbaddon.SBAddon;
+import com.huanj.sbaddon.compat.create.CreateAttributeFilterCompat;
 import com.huanj.sbaddon.compat.fxntstorage.FxntClassifyData;
 import com.huanj.sbaddon.compat.fxntstorage.FxntClassifyMenu;
 import net.fxnt.fxntstorage.backpack.client.menu.BackpackMenu;
@@ -118,7 +119,11 @@ public record FxntClassifyAction(int action, int index, int dir, String groupId,
                     if (index < 0 || index >= samples.size()) {
                         return;
                     }
-                    samples.remove(index);
+                    ItemStack removed = samples.remove(index);
+                    // 属性过滤器是消耗品：加进来时从玩家手上扣了一个，删掉这条分类要还回去
+                    if (CreateAttributeFilterCompat.isAttributeFilter(removed)) {
+                        refund(player, removed);
+                    }
                 }
                 case ACTION_MOVE -> {
                     int target = index + dir;
@@ -133,7 +138,19 @@ public record FxntClassifyAction(int action, int index, int dir, String groupId,
                     if (sample.isEmpty()) {
                         return;
                     }
+                    // 手上必须真有这只物品，否则就是伪造包，直接拒绝（否则等于凭空造过滤器）
+                    ItemStack carried = menu.getCarried();
+                    if (carried.isEmpty()
+                            || !FxntClassifyData.groupKey(carried).equals(FxntClassifyData.groupKey(sample))) {
+                        return;
+                    }
+                    int before = samples.size();
                     samples = FxntClassifyData.addSample(samples, sample);
+                    if (samples.size() > before) {
+                        // 真加了一条新分类：把这一个从光标上扣掉（属性过滤器有配置，不能白拿）
+                        carried.shrink(1);
+                        menu.setCarried(carried);
+                    }
                 }
                 case ACTION_REORDER -> {
                     if (index < 0 || index >= samples.size() || dir < 0 || dir >= samples.size()
@@ -158,5 +175,16 @@ public record FxntClassifyAction(int action, int index, int dir, String groupId,
             // 背包内容随 CONTAINER 组件落盘，槽位差异再自动同步给客户端
             slot.setChanged();
         });
+    }
+
+    /** 把物品还给玩家：先进背包，塞不下就掉在脚下。 */
+    private static void refund(ServerPlayer player, ItemStack stack) {
+        if (stack.isEmpty()) {
+            return;
+        }
+        ItemStack copy = stack.copyWithCount(1);
+        if (!player.getInventory().add(copy)) {
+            player.drop(copy, false);
+        }
     }
 }

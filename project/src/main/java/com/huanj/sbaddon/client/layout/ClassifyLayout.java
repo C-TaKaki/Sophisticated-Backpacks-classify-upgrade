@@ -76,6 +76,15 @@ public final class ClassifyLayout {
         List<ClassifyGroup> groups = ClassifyGroups.build(samples, Minecraft.getInstance().level,
                 source.customNames());
 
+        // 删掉的分类不能再靠"本次会话活跃过"继续挂横幅：每帧按当前配置收缩一次，
+        // 这样增删分类立刻生效，不用重开背包
+        Set<String> configuredGroups = new HashSet<>();
+        for (ClassifyGroup group : groups) {
+            configuredGroups.add(group.id());
+        }
+        configuredGroups.add(SlotMemory.FALLBACK);
+        SlotMemory.retainActive(configuredGroups);
+
         SlotMemory.syncMenu(source.identity(), storageSlots);
 
         Map<String, List<Integer>> buckets = new LinkedHashMap<>();

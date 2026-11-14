@@ -162,6 +162,9 @@ public abstract class BackpackScreenMixin {
     /** 上一帧滚动行，滚动时不播过渡动画。 */
     @Unique
     private int sbaddon$lastMotionScroll = -1;
+    /** 上一帧的存储槽数量：容量变了就丢掉动画缓存。 */
+    @Unique
+    private int sbaddon$lastMotionSlots = -1;
     @Unique
     private int sbaddon$scroll;
     @Unique
@@ -327,14 +330,17 @@ public abstract class BackpackScreenMixin {
                     SBADDON_ORIGIN_X, SBADDON_ORIGIN_Y);
         }
 
-        // 滚动时整片内容平移，插值会变成"追着滚"的补偿动画 —— 丢掉缓存让它瞬间落位
-        if (sbaddon$scroll != sbaddon$lastMotionScroll) {
+        // 滚动时整片内容平移，插值会变成"追着滚"的补偿动画 —— 丢掉缓存让它瞬间落位。
+        // 存储槽数量变化（换背包 / 加装升级）同理
+        int storageSlots = menu.layout.items().getCount();
+        if (sbaddon$scroll != sbaddon$lastMotionScroll || storageSlots != sbaddon$lastMotionSlots) {
             sbaddon$motion.reset();
             sbaddon$lastMotionScroll = sbaddon$scroll;
+            sbaddon$lastMotionSlots = storageSlots;
         }
 
         sbaddon$motion.beginFrame();
-        int slotCount = menu.layout.items().getCount();
+        int slotCount = storageSlots;
         for (int i = 0; i < slotCount; i++) {
             Slot slot = menu.getSlot(i);
             slot.x = SBADDON_HIDDEN;

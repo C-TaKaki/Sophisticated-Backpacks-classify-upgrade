@@ -1,10 +1,12 @@
 package com.huanj.sbaddon.client;
 
 import com.huanj.sbaddon.client.layout.ClassifyGroups;
+import com.huanj.sbaddon.compat.create.CreateAttributeFilterCompat;
 import com.huanj.sbaddon.upgrade.ClassifyUpgradeContainer;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.screens.Screen;
+import net.minecraft.nbt.CompoundTag;
 import net.minecraft.network.chat.Component;
 import net.minecraft.world.inventory.Slot;
 import net.minecraft.world.item.ItemStack;
@@ -880,16 +882,32 @@ public class ClassifyTab extends UpgradeSettingsTab<ClassifyUpgradeContainer> {
         getContainer().sendDataToServer(() -> ClassifyUpgradeContainer.reorderTag(slotOrder));
     }
 
-    /** 删掉第 row 条分类：直接重排样本槽数据并同步服务端，槽里的物品本身不还给玩家。 */
+    /**
+     * 删掉第 row 条分类：重排样本槽数据并同步服务端。
+     * <p>
+     * 属性过滤器是**消耗品**（加进来时已经从玩家手上扣了一个），所以删这一条时要把那只过滤器
+     * 打包回传给服务端发放；普通模组样本只是图标，照旧不还。
+     */
     private void deleteEntry(int row) {
         List<Integer> order = new ArrayList<>(usedSlots());
         if (row < 0 || row >= order.size()) {
             return;
         }
+        ItemStack removed = getContainer().getSamples().getStackInSlot(order.get(row));
+        CompoundTag refund = null;
+        Minecraft minecraft = Minecraft.getInstance();
+        if (CreateAttributeFilterCompat.isAttributeFilter(removed) && minecraft.level != null) {
+            CompoundTag payload = new CompoundTag();
+            removed.copyWithCount(1).save(minecraft.level.registryAccess(), payload);
+            refund = payload;
+        }
+        final CompoundTag refundTag = refund;
+
         order.remove(row);
         int[] slotOrder = order.stream().mapToInt(Integer::intValue).toArray();
         getContainer().applyOrder(slotOrder);
-        getContainer().sendDataToServer(() -> ClassifyUpgradeContainer.reorderTag(slotOrder));
+        getContainer().sendDataToServer(
+                () -> ClassifyUpgradeContainer.reorderTag(slotOrder, refundTag));
         // 行顺序变了，缓存的 y 与索引不再对应，直接丢掉，避免删完又播一次滑动
         rowDisplayY.clear();
         if (scrollRow > 0) {

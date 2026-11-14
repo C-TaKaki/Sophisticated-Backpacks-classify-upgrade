@@ -38,7 +38,11 @@ public final class FxntClassifyData {
         }
     }
 
-    /** 缓存键：CUSTOM_DATA 组件是不可变写时复制的，引用变了就说明数据被改过。 */
+    /**
+     * 缓存键。用**值**比较而不是引用比较：同一次数据变化，客户端拿到的 ItemStack 实例可能复用，
+     * 也可能换成内容相同的新实例；按引用判会漏掉"数据变了但实例没换"的情况，
+     * 表现就是要重开背包界面才刷新。
+     */
     private static CustomData cacheKey;
     private static boolean cacheValid;
     private static Snapshot cache = Snapshot.empty();
@@ -61,7 +65,7 @@ public final class FxntClassifyData {
     /** 读一次快照（样本 + 自定义名），按组件引用缓存。 */
     public static Snapshot snapshot(ItemStack stack, HolderLookup.Provider registries) {
         CustomData key = stack.get(DataComponents.CUSTOM_DATA);
-        if (cacheValid && key == cacheKey) {
+        if (cacheValid && java.util.Objects.equals(key, cacheKey)) {
             return cache;
         }
         List<ItemStack> samples = readSamples(stack, registries);
