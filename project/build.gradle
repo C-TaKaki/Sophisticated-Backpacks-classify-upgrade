@@ -7,7 +7,9 @@ version = mod_version
 group = mod_group_id
 
 base {
-    archivesName = mod_id
+    // 产物文件名用模组显示名（Sophisticated Backpacks Addon-0.74.jar）。
+    // 打包/分发时记得给带空格的路径加引号。
+    archivesName = mod_name
 }
 
 java {
