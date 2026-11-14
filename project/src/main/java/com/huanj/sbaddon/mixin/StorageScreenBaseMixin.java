@@ -219,7 +219,9 @@ public abstract class StorageScreenBaseMixin {
      */
     @Inject(method = "drawSlotBg", at = @At("HEAD"), cancellable = true)
     private void sbaddon$drawSlotBg(GuiGraphics graphics, int left, int top, int slotsCount, CallbackInfo ci) {
-        if (!sbaddon$placements.isEmpty()) {
+        // 只看"分类视图是否接管"，不看有没有格子：
+        // 所有分类都收起时一个格子都不该画，但原生那块灰底照样会画出来，看着像一片空格子
+        if (sbaddon$layoutApplied) {
             ci.cancel();
         }
     }

@@ -37,8 +37,9 @@ public class ClassifyUpgradeContainer extends UpgradeContainerBase<ClassifyUpgra
     private static final String TAG_ORDER = "Order";
     private static final String TAG_AUTO = "AutoClassify";
     private static final String TAG_RENAME = "Rename";
-    /** 删除分类时把样本物品还给玩家（属性过滤器是消耗品，不能凭空没收）。 */
-    private static final String TAG_REFUND = "Refund";
+    /** 删除分类时把样本物品还给玩家（属性过滤器是消耗品，不能凭空没收）。
+     *  只传行号：物品本体由服务端自己从样本槽读，避免 ItemStack 过 NBT 时装不进去。 */
+    private static final String TAG_REFUND_ROW = "RefundRow";
     private static final String TAG_RENAME_ID = "Id";
     private static final String TAG_RENAME_NAME = "Name";
 
@@ -165,6 +166,10 @@ public class ClassifyUpgradeContainer extends UpgradeContainerBase<ClassifyUpgra
         if (tag.contains(TAG_VIEW)) {
             upgradeWrapper.setView(tag.getInt(TAG_VIEW));
         }
+        // 先归还再重排：归还读的是"第几行"，必须在样本槽被重排之前取
+        if (tag.contains(TAG_REFUND_ROW) && !player.level().isClientSide()) {
+            refundRow(tag.getInt(TAG_REFUND_ROW));
+        }
         if (tag.contains(TAG_ORDER)) {
             applyOrder(tag.getIntArray(TAG_ORDER));
         }
@@ -175,14 +180,7 @@ public class ClassifyUpgradeContainer extends UpgradeContainerBase<ClassifyUpgra
             CompoundTag rename = tag.getCompound(TAG_RENAME);
             applyRename(rename.getString(TAG_RENAME_ID), rename.getString(TAG_RENAME_NAME));
         }
-        if (tag.contains(TAG_REFUND) && !player.level().isClientSide()) {
-            // 删除分类时归还样本物品：先进背包，塞不下就掉在脚下
-            ItemStack refund = ItemStack.parseOptional(player.level().registryAccess(),
-                    tag.getCompound(TAG_REFUND));
-            if (!refund.isEmpty() && !player.getInventory().add(refund)) {
-                player.drop(refund, false);
-            }
-        }
+
     }
 
     /**
@@ -243,13 +241,38 @@ public class ClassifyUpgradeContainer extends UpgradeContainerBase<ClassifyUpgra
         return tag;
     }
 
-    /** 重排 + 顺带归还一件样本物品（删除属性过滤器分类时用）。 */
-    public static CompoundTag reorderTag(int[] slotOrder, CompoundTag refund) {
+    /** 重排 + 顺带归还第 {@code refundRow} 行的样本物品（删除属性过滤器分类时用）。 */
+    public static CompoundTag reorderTag(int[] slotOrder, int refundRow) {
         CompoundTag tag = reorderTag(slotOrder);
-        if (refund != null && !refund.isEmpty()) {
-            tag.put(TAG_REFUND, refund);
+        if (refundRow >= 0) {
+            tag.putInt(TAG_REFUND_ROW, refundRow);
         }
         return tag;
+    }
+
+    /**
+     * 把第 row 条分类对应的样本物品还给玩家。
+     * <p>
+     * 只还属性过滤器：它加进来时被真正扣过费；普通模组样本只是图标，从来没有扣过，不能凭空发。
+     */
+    private void refundRow(int row) {
+        List<Integer> used = new java.util.ArrayList<>();
+        for (int i = 0; i < samples.getSlots(); i++) {
+            if (!samples.getStackInSlot(i).isEmpty()) {
+                used.add(i);
+            }
+        }
+        if (row < 0 || row >= used.size()) {
+            return;
+        }
+        ItemStack removed = samples.getStackInSlot(used.get(row));
+        if (!CreateAttributeFilterCompat.isAttributeFilter(removed)) {
+            return;
+        }
+        ItemStack refund = removed.copyWithCount(1);
+        if (!player.getInventory().add(refund)) {
+            player.drop(refund, false);
+        }
     }
 
     /** 「一键分类」：请求服务端扫描背包并补全分类。 */

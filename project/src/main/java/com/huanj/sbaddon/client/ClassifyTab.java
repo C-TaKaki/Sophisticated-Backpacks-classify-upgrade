@@ -6,7 +6,6 @@ import com.huanj.sbaddon.upgrade.ClassifyUpgradeContainer;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.screens.Screen;
-import net.minecraft.nbt.CompoundTag;
 import net.minecraft.network.chat.Component;
 import net.minecraft.world.inventory.Slot;
 import net.minecraft.world.item.ItemStack;
@@ -893,21 +892,13 @@ public class ClassifyTab extends UpgradeSettingsTab<ClassifyUpgradeContainer> {
         if (row < 0 || row >= order.size()) {
             return;
         }
-        ItemStack removed = getContainer().getSamples().getStackInSlot(order.get(row));
-        CompoundTag refund = null;
-        Minecraft minecraft = Minecraft.getInstance();
-        if (CreateAttributeFilterCompat.isAttributeFilter(removed) && minecraft.level != null) {
-            CompoundTag payload = new CompoundTag();
-            removed.copyWithCount(1).save(minecraft.level.registryAccess(), payload);
-            refund = payload;
-        }
-        final CompoundTag refundTag = refund;
-
+        // 行号就够了：物品本体由服务端从自己的样本槽里读，别让 ItemStack 过 NBT
+        // （装不进去就会静默变成空栈，表现就是"删除后什么都没还回来"）
         order.remove(row);
         int[] slotOrder = order.stream().mapToInt(Integer::intValue).toArray();
         getContainer().applyOrder(slotOrder);
         getContainer().sendDataToServer(
-                () -> ClassifyUpgradeContainer.reorderTag(slotOrder, refundTag));
+                () -> ClassifyUpgradeContainer.reorderTag(slotOrder, row));
         // 行顺序变了，缓存的 y 与索引不再对应，直接丢掉，避免删完又播一次滑动
         rowDisplayY.clear();
         if (scrollRow > 0) {
