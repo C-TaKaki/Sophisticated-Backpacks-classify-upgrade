@@ -61,8 +61,24 @@ public class ClassifyUpgradeContainer extends UpgradeContainerBase<ClassifyUpgra
 
         for (int i = 0; i < SAMPLE_COUNT; i++) {
             // 初始位置放在屏幕外，页签真正打开时才摆进来
-            slots.add(new SampleSlot(samples, i, -10000, -10000));
+            slots.add(new SampleSlot(this, samples, i, -10000, -10000));
         }
+    }
+
+    /**
+     * 从光标上扣掉一个物品（样本槽的幽灵放入不扣数量，属性过滤器要单独收一次）。
+     * 只在服务端执行，扣完由菜单同步回客户端。
+     */
+    void chargeFilterFromCursor() {
+        if (player.level().isClientSide()) {
+            return;
+        }
+        ItemStack carried = player.containerMenu.getCarried();
+        if (carried.isEmpty()) {
+            return;
+        }
+        carried.shrink(1);
+        player.containerMenu.setCarried(carried);
     }
 
     private void persistSamples() {
@@ -270,10 +286,35 @@ public class ClassifyUpgradeContainer extends UpgradeContainerBase<ClassifyUpgra
      */
     public static class SampleSlot extends SlotItemHandler implements IFilterSlot {
         private final ItemStackHandler handler;
+        private final ClassifyUpgradeContainer container;
+        /** 上一次已经收过费的过滤器配置；同一只重复点不再重复扣。 */
+        private String chargedKey;
 
-        public SampleSlot(ItemStackHandler handler, int index, int x, int y) {
+        public SampleSlot(ClassifyUpgradeContainer container, ItemStackHandler handler,
+                          int index, int x, int y) {
             super(handler, index, x, y);
             this.handler = handler;
+            this.container = container;
+        }
+
+        /**
+         * 幽灵放入完成后的回调（{@code StorageContainerMenuBase.clicked} 里 set 完就调它）。
+         * <p>
+         * 幽灵槽不扣玩家手上的数量，凭这一点属性过滤器就会被白拿 —— 它是带配置的物品，
+         * 不能白拿。这里按「槽里换成了另一只过滤器」补扣一次；重复点同一只不会重复扣。
+         */
+        @Override
+        public void onItemSet(int button) {
+            ItemStack now = getItem();
+            String key = CreateAttributeFilterCompat.isAttributeFilter(now)
+                    ? CreateAttributeFilterCompat.key(now)
+                    : null;
+            if (key == null || key.equals(chargedKey)) {
+                chargedKey = key;
+                return;
+            }
+            chargedKey = key;
+            container.chargeFilterFromCursor();
         }
 
         @Override

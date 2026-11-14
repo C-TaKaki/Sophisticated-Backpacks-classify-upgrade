@@ -21,6 +21,9 @@ import java.util.Set;
  */
 public final class ClassifyGroups {
 
+    /** 属性过滤器分组 id 的前缀。匹配优先级靠它判定（过滤器恒为最高）。 */
+    public static final String ATTR_PREFIX = "attr:";
+
     /** 界面行上要显示的内容（图标 + 文字）。属性过滤器直接用它自己的物品做图标。 */
     public record Row(ItemStack icon, Component label) {
     }
@@ -34,7 +37,7 @@ public final class ClassifyGroups {
             return null;
         }
         if (CreateAttributeFilterCompat.isAttributeFilter(sample)) {
-            return "attr:" + CreateAttributeFilterCompat.key(sample);
+            return ATTR_PREFIX + CreateAttributeFilterCompat.key(sample);
         }
         return "mod:" + ModNames.namespaceOf(sample);
     }

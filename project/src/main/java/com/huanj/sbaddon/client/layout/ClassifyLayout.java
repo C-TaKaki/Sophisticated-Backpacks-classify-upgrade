@@ -76,15 +76,6 @@ public final class ClassifyLayout {
         List<ClassifyGroup> groups = ClassifyGroups.build(samples, Minecraft.getInstance().level,
                 source.customNames());
 
-        // 删掉的分类不能再靠"本次会话活跃过"继续挂横幅：每帧按当前配置收缩一次，
-        // 这样增删分类立刻生效，不用重开背包
-        Set<String> configuredGroups = new HashSet<>();
-        for (ClassifyGroup group : groups) {
-            configuredGroups.add(group.id());
-        }
-        configuredGroups.add(SlotMemory.FALLBACK);
-        SlotMemory.retainActive(configuredGroups);
-
         SlotMemory.syncMenu(source.identity(), storageSlots);
 
         Map<String, List<Integer>> buckets = new LinkedHashMap<>();
@@ -105,19 +96,14 @@ public final class ClassifyLayout {
                 continue;
             }
             occupied[i] = true;
-            // 先声明的组优先：属性过滤器排在某个模组组前面时，命中的物品归过滤器
-            String groupKey = SlotMemory.FALLBACK;
-            for (ClassifyGroup group : groups) {
-                if (group.predicate().test(stack)) {
-                    groupKey = group.id();
-                    break;
-                }
-            }
+            // 属性过滤器的优先级恒为最高：先扫过滤器分组，再扫模组分组。
+            // 只看列表顺序的话，背包里一旦有 create: 的模组分类，create 的物品会先被模组组吃掉，
+            // 排在后面的过滤器分类永远是空的 —— 表现就是"过滤器分类不生效 / 不显示"。
+            String groupKey = matchGroup(groups, stack);
             List<Integer> bucket = buckets.get(groupKey);
             // 记住这个槽归属哪个组：物品取走后槽变空，靠它继续占住原来的位置
             SlotMemory.remember(i, groupKey);
             // 这个组本次会话里有过物品 —— 即使等下被取空，横幅也留着，直到重新打开背包
-            SlotMemory.markActive(groupKey);
             if (bucket != null) {
                 bucket.add(i);
             } else {
@@ -142,14 +128,14 @@ public final class ClassifyLayout {
             if (items == null) {
                 continue;
             }
-            if (items.isEmpty() && !SlotMemory.wasActive(group.id())) {
-                // 本次会话里从没装过这个分类的东西：不画横幅。重新打开背包后也会走这里，
-                // 所以"空标签只在重开时隐藏"自然成立
+            if (items.isEmpty()) {
+                // 一个物品都没有的分类直接隐藏（横幅 + 格子都不占）。
+                // 之前靠"本次会话活跃过"续命，要重开背包才消失，现在实时生效。
                 continue;
             }
             blocks.add(new Block(group, mergeHoles(items, group.id(), holes, claimed)));
         }
-        if (!fallback.isEmpty() || SlotMemory.wasActive(SlotMemory.FALLBACK)) {
+        if (!fallback.isEmpty()) {
             blocks.add(new Block(
                     new ClassifyGroup(SlotMemory.FALLBACK, iconFor(samples, null),
                             Component.translatable("gui.sbaddon.classify.fallback"), stack -> false),
@@ -252,7 +238,7 @@ public final class ClassifyLayout {
      * 后面的物品就不会往前补位。
      * <p>
      * 物品被全部取走时，这里仍然返回"只剩空洞（或空列表）"的序列：调用方会照常画横幅，
-     * 标签不会消失。空标签的隐藏交给「重新打开背包」——那时 {@code wasActive} 已重置。
+     * 标签不会消失。
      */
     private static List<Integer> mergeHoles(List<Integer> items, String groupKey,
                                             Set<Integer> holes, Set<Integer> claimed) {
@@ -271,6 +257,26 @@ public final class ClassifyLayout {
         merged.sort(Integer::compareTo);
         claimed.addAll(groupHoles);
         return merged;
+    }
+
+    /**
+     * 给物品挑分组：属性过滤器永远优先，其次才是模组分组。
+     * <p>
+     * 两轮遍历而不是"谁排在前面谁先命中"，这样面板里的显示顺序（= 样本顺序）保持不变，
+     * 只把匹配优先级固定成"过滤器最高"。
+     */
+    private static String matchGroup(List<ClassifyGroup> groups, ItemStack stack) {
+        for (ClassifyGroup group : groups) {
+            if (group.id().startsWith(ClassifyGroups.ATTR_PREFIX) && group.predicate().test(stack)) {
+                return group.id();
+            }
+        }
+        for (ClassifyGroup group : groups) {
+            if (!group.id().startsWith(ClassifyGroups.ATTR_PREFIX) && group.predicate().test(stack)) {
+                return group.id();
+            }
+        }
+        return SlotMemory.FALLBACK;
     }
 
     private static ItemStack iconFor(List<ItemStack> samples, String namespace) {
