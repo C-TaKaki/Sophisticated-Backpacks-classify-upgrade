@@ -1,6 +1,7 @@
 package com.huanj.sbaddon.compat.fxntstorage.net;
 
 import com.huanj.sbaddon.SBAddon;
+import com.huanj.sbaddon.client.layout.ClassifyGroups;
 import com.huanj.sbaddon.compat.create.CreateAttributeFilterCompat;
 import com.huanj.sbaddon.compat.fxntstorage.FxntClassifyData;
 import com.huanj.sbaddon.compat.fxntstorage.FxntClassifyMenu;
@@ -162,6 +163,16 @@ public record FxntClassifyAction(int action, int index, int dir, String groupId,
                 }
                 case ACTION_RENAME -> {
                     FxntClassifyData.setName(upgradeStack, groupId, name);
+                    // 名字同时写进对应的样本物品：属性过滤器的分组 id 是由组件字符串算 hash 得到的，
+                    // 重启 / NBT 往返后可能对不上，只有「名字跟着样本走」才不会丢
+                    for (ItemStack sample : samples) {
+                        if (sample.isEmpty() || !groupId.equals(ClassifyGroups.groupId(sample))) {
+                            continue;
+                        }
+                        ClassifyGroups.storeName(sample, name);
+                        break;
+                    }
+                    FxntClassifyData.writeSamples(upgradeStack, samples, registries);
                     slot.setChanged();
                     return;
                 }

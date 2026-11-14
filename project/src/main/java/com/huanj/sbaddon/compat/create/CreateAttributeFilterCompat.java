@@ -1,6 +1,7 @@
 package com.huanj.sbaddon.compat.create;
 
 import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.nbt.CompoundTag;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.Level;
@@ -201,8 +202,22 @@ public final class CreateAttributeFilterCompat {
      * 只用于分组 key（折叠记忆 / 取物空洞归属），不需要密码学级唯一。
      */
     public static String key(ItemStack filter) {
-        int hash = 31 * BuiltInRegistries.ITEM.getKey(filter.getItem()).hashCode()
-                + String.valueOf(filter.getComponents()).hashCode();
+        // 先剥掉我们自己的「自定义名」标签再算：样本上写了名字之后组件字符串会变，
+        // 不剥的话同一个过滤器改名前后的分组 id 不同（折叠状态、旧名字表都会跟着失联）
+        ItemStack cleaned = filter.copy();
+        CompoundTag custom = cleaned.getOrDefault(net.minecraft.core.component.DataComponents.CUSTOM_DATA,
+                net.minecraft.world.item.component.CustomData.EMPTY).copyTag();
+        if (custom.contains(com.huanj.sbaddon.client.layout.ClassifyGroups.NAME_TAG)) {
+            custom.remove(com.huanj.sbaddon.client.layout.ClassifyGroups.NAME_TAG);
+            if (custom.isEmpty()) {
+                cleaned.remove(net.minecraft.core.component.DataComponents.CUSTOM_DATA);
+            } else {
+                cleaned.set(net.minecraft.core.component.DataComponents.CUSTOM_DATA,
+                        net.minecraft.world.item.component.CustomData.of(custom));
+            }
+        }
+        int hash = 31 * BuiltInRegistries.ITEM.getKey(cleaned.getItem()).hashCode()
+                + String.valueOf(cleaned.getComponents()).hashCode();
         return Integer.toHexString(hash);
     }
 

@@ -1,5 +1,6 @@
 package com.huanj.sbaddon.upgrade;
 
+import com.huanj.sbaddon.client.layout.ClassifyGroups;
 import com.huanj.sbaddon.compat.create.CreateAttributeFilterCompat;
 import net.minecraft.core.HolderLookup;
 import net.minecraft.core.registries.BuiltInRegistries;
@@ -139,6 +140,28 @@ public class ClassifyUpgradeContainer extends UpgradeContainerBase<ClassifyUpgra
             cleaned = cleaned.substring(0, MAX_NAME_LENGTH);
         }
         upgradeWrapper.setCustomName(groupId, cleaned);
+        // 同时写进样本物品自己身上：属性过滤器的分组 id 由组件字符串算 hash 得到，
+        // 重启 / NBT 往返后可能对不上，只有「名字跟着样本走」才不会丢
+        syncNameIntoSample(groupId, cleaned);
+    }
+
+    /**
+     * 把名字写进分组 id 匹配的那条样本。
+     * <p>
+     * 用 {@code setStackInSlot} 回写而不是原地改：走 handler 的 onContentsChanged 才会触发
+     * {@code persistSamples()}（服务端落盘 / 客户端忽略），和样本本身的保存路径保持一条。
+     */
+    private void syncNameIntoSample(String groupId, String name) {
+        for (int i = 0; i < samples.getSlots(); i++) {
+            ItemStack stack = samples.getStackInSlot(i);
+            if (stack.isEmpty() || !groupId.equals(ClassifyGroups.groupId(stack))) {
+                continue;
+            }
+            if (ClassifyGroups.storeName(stack, name)) {
+                samples.setStackInSlot(i, stack);
+            }
+            return;
+        }
     }
 
     /** 升级是否启用（升级槽左侧的那个开关）。关掉时背包网格恢复原版排版，不做分类。 */

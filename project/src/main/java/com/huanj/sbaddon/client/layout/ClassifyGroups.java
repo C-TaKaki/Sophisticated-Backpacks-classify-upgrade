@@ -2,8 +2,11 @@ package com.huanj.sbaddon.client.layout;
 
 import com.huanj.sbaddon.client.ModNames;
 import com.huanj.sbaddon.compat.create.CreateAttributeFilterCompat;
+import net.minecraft.core.component.DataComponents;
+import net.minecraft.nbt.CompoundTag;
 import net.minecraft.network.chat.Component;
 import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.component.CustomData;
 import net.minecraft.world.level.Level;
 
 import java.util.ArrayList;
@@ -23,6 +26,57 @@ public final class ClassifyGroups {
 
     /** 属性过滤器分组 id 的前缀。匹配优先级靠它判定（过滤器恒为最高）。 */
     public static final String ATTR_PREFIX = "attr:";
+
+    /**
+     * 直接记在样本物品 CUSTOM_DATA 里的自定义名。
+     * <p>
+     * 为什么不只靠「分组 id → 名字」的表：属性过滤器的 id 由 {@code filter.getComponents()} 的字符串
+     * 算 hash 得来，配置本身经历过 NBT 往返 / 重启后字符串可能变，id 跟着变，表里那条就查不到了
+     * （表现就是只有属性过滤器分类的改名会丢）。写进样本自己身上就没有这个依赖：
+     * 样本存在升级 NBT 里，名字跟着样本走，顺带免疫重排。
+     */
+    public static final String NAME_TAG = "SbaddonName";
+
+    /** 样本上直接记的名字；没有返回 {@code null}。 */
+    public static String storedName(ItemStack sample) {
+        if (sample == null || sample.isEmpty()) {
+            return null;
+        }
+        CompoundTag data = sample.getOrDefault(DataComponents.CUSTOM_DATA, CustomData.EMPTY).copyTag();
+        String name = data.getString(NAME_TAG);
+        return name.isBlank() ? null : name;
+    }
+
+    /**
+     * 把名字写进样本物品（{@code null} / 空串 = 删掉，恢复默认名）。
+     *
+     * @return 是否真的改动了（调用方据此决定要不要回写样本槽）
+     */
+    public static boolean storeName(ItemStack sample, String name) {
+        if (sample == null || sample.isEmpty()) {
+            return false;
+        }
+        CompoundTag data = sample.getOrDefault(DataComponents.CUSTOM_DATA, CustomData.EMPTY).copyTag();
+        String old = data.getString(NAME_TAG);
+        String cleaned = name == null ? "" : name.strip();
+        if (cleaned.isEmpty()) {
+            if (old.isEmpty()) {
+                return false;
+            }
+            data.remove(NAME_TAG);
+        } else {
+            if (cleaned.equals(old)) {
+                return false;
+            }
+            data.putString(NAME_TAG, cleaned);
+        }
+        if (data.isEmpty()) {
+            sample.remove(DataComponents.CUSTOM_DATA);
+        } else {
+            sample.set(DataComponents.CUSTOM_DATA, CustomData.of(data));
+        }
+        return true;
+    }
 
     /** 界面行上要显示的内容（图标 + 文字）。属性过滤器直接用它自己的物品做图标。 */
     public record Row(ItemStack icon, Component label) {
@@ -65,7 +119,7 @@ public final class ClassifyGroups {
                 }
                 if (seenIds.add(id)) {
                     groups.add(new ClassifyGroup(id, sample.copyWithCount(1),
-                            labelFor(id, filterLabel(sample), customNames), predicate));
+                            labelFor(id, sample, filterLabel(sample), customNames), predicate));
                 }
                 continue;
             }
@@ -77,7 +131,7 @@ public final class ClassifyGroups {
             groups.add(new ClassifyGroup(
                     id,
                     tabIcon.isEmpty() ? sample.copyWithCount(1) : tabIcon,
-                    labelFor(id, ModNames.displayName(namespace), customNames),
+                    labelFor(id, sample, ModNames.displayName(namespace), customNames),
                     stack -> !stack.isEmpty() && namespace.equals(ModNames.namespaceOf(stack))));
         }
         return groups;
@@ -90,16 +144,26 @@ public final class ClassifyGroups {
         }
         String id = groupId(sample);
         if (CreateAttributeFilterCompat.isAttributeFilter(sample)) {
-            return new Row(sample.copyWithCount(1), labelFor(id, filterLabel(sample), customNames));
+            return new Row(sample.copyWithCount(1), labelFor(id, sample, filterLabel(sample), customNames));
         }
         String namespace = ModNames.namespaceOf(sample);
         ItemStack tabIcon = ModNames.icon(namespace);
         return new Row(tabIcon.isEmpty() ? sample.copyWithCount(1) : tabIcon,
-                labelFor(id, ModNames.displayName(namespace), customNames));
+                labelFor(id, sample, ModNames.displayName(namespace), customNames));
     }
 
-    /** 玩家改过名就用玩家的，否则用默认名。 */
-    private static Component labelFor(String groupId, Component fallback, Map<String, String> customNames) {
+    /**
+     * 玩家改过名就用玩家的，否则用默认名。
+     * <p>
+     * 优先读样本物品上直接记的名字（稳定，跟着样本走），读不到再退回「分组 id → 名字」的表。
+     * 表那条是为兼容已经存下来的旧数据保留的。
+     */
+    private static Component labelFor(String groupId, ItemStack sample, Component fallback,
+                                      Map<String, String> customNames) {
+        String stored = storedName(sample);
+        if (stored != null) {
+            return Component.literal(stored);
+        }
         if (customNames == null || groupId == null) {
             return fallback;
         }
